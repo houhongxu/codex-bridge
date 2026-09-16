@@ -1,6 +1,6 @@
 """Per-CLI WebSocket relay that opens that CLI's task in the desktop app.
 
-RPC messages pass through unchanged. Only responses to this connection's own
+Ordinary RPC messages pass through unchanged. Only responses to this connection's own
 start/resume/fork requests and its turn/start requests trigger desktop linking.
 """
 
@@ -20,6 +20,8 @@ import uuid
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
+
+from question_sync import QuestionSync
 
 
 def object_message(raw):
@@ -219,9 +221,10 @@ class DesktopAttacher:
 
 
 class Relay:
-    def __init__(self, upstream, attach):
+    def __init__(self, upstream, attach, question_sync=True):
         self.upstream = upstream
         self.attach = attach
+        self.question_sync = question_sync
 
     async def safely_attach(self, thread_id):
         try:
@@ -237,9 +240,19 @@ class Relay:
         attachable = set()
         async with connect(self.upstream, proxy=None, compression=None,
                            max_size=None, close_timeout=2) as upstream:
+            async def send_cli(message):
+                await downstream.send(json.dumps(message, ensure_ascii=False))
+
+            async def send_backend(message):
+                await upstream.send(json.dumps(message, ensure_ascii=False))
+
+            questions = QuestionSync(send_cli, send_backend) if self.question_sync else None
+
             async def from_cli():
                 async for raw in downstream:
                     message = object_message(raw)
+                    if questions is not None and await questions.from_cli(message):
+                        continue
                     method = message.get("method")
                     if method in {"thread/start", "thread/resume", "thread/fork"} and "id" in message:
                         pending[message["id"]] = message.get("params", {}).get("ephemeral") is True
@@ -258,11 +271,22 @@ class Relay:
                         thread = message.get("result", {}).get("thread", {})
                         thread_id = thread.get("id")
                         if valid_thread_id(thread_id):
+                            if questions is not None:
+                                questions.track_thread(thread)
                             attachable.discard(thread_id)
                             if thread.get("ephemeral") is False and not requested_ephemeral:
                                 attachable.add(thread_id)
                                 await self.safely_attach(thread_id)
-                    await downstream.send(raw)
+                    if questions is None:
+                        await downstream.send(raw)
+                    else:
+                        forwarded, extra = questions.from_backend(message)
+                        if forwarded is message:
+                            await downstream.send(raw)
+                        elif forwarded is not None:
+                            await send_cli(forwarded)
+                        for notification in extra:
+                            await send_cli(notification)
 
             tasks = {asyncio.create_task(from_cli()), asyncio.create_task(from_backend())}
             try:
@@ -274,6 +298,8 @@ class Relay:
                 for task in tasks:
                     task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
+                if questions is not None:
+                    await questions.close()
                 await downstream.close()
 
 
@@ -283,7 +309,8 @@ async def main():
     parser.add_argument("--app", required=True)
     args = parser.parse_args()
     token = secrets.token_urlsafe(24)
-    relay = Relay(args.upstream, DesktopAttacher(args.app))
+    relay = Relay(args.upstream, DesktopAttacher(args.app),
+                  question_sync=os.environ.get("CPET_QUESTION_SYNC", "1") != "0")
 
     async def handle(connection):
         if not relay_authorized(connection.request, token):

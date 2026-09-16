@@ -7,7 +7,7 @@
 
 [简体中文](README.md) · English · [Architecture](docs/architecture.md) · [Troubleshooting](docs/troubleshooting.md)
 
-> Experimental: **0.1.0-alpha.1**. This is a community project, not affiliated with or endorsed by OpenAI. Desktop deep links, external-server configuration and log formats are version-dependent. Attaching a task can navigate the desktop to that task.
+> Experimental: **0.1.0-alpha.2**. This is a community project, not affiliated with or endorsed by OpenAI. Desktop deep links, external-server configuration and log formats are version-dependent. Attaching a task can navigate the desktop to that task.
 
 ## What it does
 
@@ -51,6 +51,14 @@ Enable the pet in the desktop and check an active task. First attachment or reco
 
 Optional login startup: `cpet enable`. Disable login startup without stopping current work: `cpet disable`.
 
+## Async question synchronization
+
+Since `0.1.0-alpha.2`, new `cx` sessions adapt **live async questions received after connecting**. Answering in Desktop dismisses the matching CLI question; answering in the CLI submits the Desktop-compatible answer to the same task. No official CLI or desktop files are patched.
+
+The CLI uses its standard question dialog, including its `Esc` interruption behavior. Historical question text is retained, but old dialogs are not recreated; answer outstanding historical questions in Desktop. Known duplicate or late answers are suppressed, but simultaneous submissions from two clients are not atomically coordinated.
+
+If cpet cannot confirm an answer, check Desktop before replying again: it never retries automatically. To restore native question passthrough, run `CPET_QUESTION_SYNC=0 cx resume --all`. Restart old CLI sessions after upgrading. See [tested versions and limits](docs/compatibility.md).
+
 ## Installed files are independent of the checkout
 
 The installer copies code into `~/Library/Application Support/Codex CLI Bridge/runtime/` and creates its own `.venv` there. `~/.local/bin/codex-pet` points to that installed copy. Moving or deleting the source checkout does not break installed commands. Re-run `./install.sh` to deploy source updates.
@@ -73,7 +81,7 @@ New tasks use the terminal's working directory. Resume/fork retain the existing 
 
 ## Update or uninstall
 
-Finish active tasks before updating or stopping the shared server.
+Installing updated scripts does not restart the shared server or desktop. Existing `cx` processes keep their old code. Finish active work before restarting those CLI sessions or stopping the server.
 
 ```sh
 cd /path/to/cpet

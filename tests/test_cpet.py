@@ -83,7 +83,7 @@ class PetDiagnosticsTests(unittest.TestCase):
             root = Path(directory)
             source = root / "checkout"
             source.mkdir()
-            for name in ["cpet.py", "desktop_bridge.py", "requirements.txt"]:
+            for name in ["cpet.py", "desktop_bridge.py", "question_sync.py", "requirements.txt"]:
                 shutil.copy2(Path(cpet.__file__).parent / name, source / name)
             bridge = cpet.Bridge(root / "home")
             bridge.app = Path("/Applications/ChatGPT.app")
@@ -91,6 +91,7 @@ class PetDiagnosticsTests(unittest.TestCase):
                 bridge.install()
             shutil.rmtree(source)
             self.assertTrue(bridge.bin.exists())
+            self.assertTrue((bridge.runtime / "question_sync.py").is_file())
             # Import the actual installed file in a fresh process, after removing
             # its source checkout; this also works in the Linux unit-test job.
             code = "import runpy, sys; assert runpy.run_path(sys.argv[1])['__version__']"

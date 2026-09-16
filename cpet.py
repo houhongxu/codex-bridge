@@ -18,7 +18,7 @@ import time
 import urllib.error
 import urllib.request
 
-__version__ = "0.1.0-alpha.1"
+__version__ = "0.1.0-alpha.2"
 
 ENDPOINT = "ws://127.0.0.1:4500"
 ENV_KEY = "CODEX_APP_SERVER_WS_URL"
@@ -352,7 +352,7 @@ class Bridge:
     def install_runtime(self):
         """Install an independent runtime; never point commands at the checkout."""
         source = Path(__file__).resolve().parent
-        files = ["cpet.py", "desktop_bridge.py", "requirements.txt"]
+        files = ["cpet.py", "desktop_bridge.py", "question_sync.py", "requirements.txt"]
         if (source / "LICENSE").exists():
             files.append("LICENSE")
         # Read everything before touching a working installation.
