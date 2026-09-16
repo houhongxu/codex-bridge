@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 排障 / Troubleshooting
+    url: https://github.com/houhongxu/cpet/blob/main/docs/troubleshooting.md
+    about: 先检查常见安装、订阅和宠物显示问题。
+  - name: 安全报告 / Security reports
+    url: https://github.com/houhongxu/cpet/blob/main/SECURITY.md
+    about: 请勿在公开 issue 中发布漏洞利用细节或凭据。

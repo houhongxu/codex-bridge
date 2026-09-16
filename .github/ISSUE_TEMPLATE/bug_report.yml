@@ -1,0 +1,34 @@
+name: Bug / 故障报告
+description: 报告可以复现的安装、连接或显示问题。
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 请先阅读排障文档。日志和 status 输出请脱敏；不要上传凭据或完整对话。
+  - type: textarea
+    id: versions
+    attributes:
+      label: 版本 / Versions
+      description: macOS、Python、cpet、桌面应用、内置 Codex CLI 版本。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Steps
+      description: 包含安装方式，以及更新后是否重新启动 cx。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期和实际结果 / Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 脱敏诊断 / Redacted diagnostics
+      description: 可选提供 cpet status --json 和最小日志片段，移除真实任务 ID、私人路径和凭据。
+      render: text

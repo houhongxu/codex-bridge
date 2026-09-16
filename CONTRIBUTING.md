@@ -1,0 +1,44 @@
+# 贡献指南 / Contributing
+
+感谢你愿意帮助改进 cpet。中文和英文的 issue、PR 均可。
+
+## 报告问题
+
+先阅读 [排障文档](docs/troubleshooting.md) 并搜索已有 issue。请提供：
+
+- cpet、Python、macOS、桌面应用及其内置 Codex CLI 的版本。
+- 最小复现步骤、预期结果、实际结果，是否在安装更新后重新启动了 `cx`。
+- 脱敏后的 `cpet status --json` 及相关日志片段。
+
+不要上传完整对话、账号凭据、环境变量全集、私有项目路径或原始诊断目录。安全问题走 [SECURITY.md](SECURITY.md)。
+
+## 开发流程
+
+1. Fork 本仓库，从 `main` 创建小范围分支。
+2. 大功能、平台扩展或协议改造先提 issue 对齐范围；小修可直接发 PR。
+3. 用源码目录中的开发 `.venv` 安装依赖；不要用 `install.sh` 代替测试环境准备。
+4. 运行下面的检查，说明测试范围和未验证部分。
+5. PR 解释具体问题、修改后的行为与验证结果，关联已有 issue。
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m unittest discover -s tests -v
+python3 scripts/check_repository.py
+sh -n install.sh
+git diff --check
+```
+
+测试需要可绑定本机回环端口。无桌面环境也可运行隔离测试；手工桌面验证按 [兼容性检查](docs/compatibility.md) 执行。不要让自动化测试打开真实任务、调用真实模型、改变本机自启或替用户回答审批。
+
+## 代码约定
+
+- Python 3.9+，优先标准库；新增运行依赖需要解释必要性。
+- 明确区分 CLI 自己的响应和后台广播，避免把其他客户端或临时任务接入桌面。
+- 模型输入、工具输出和权限决策原样转发。不能通过修改转接消息扩大执行权限。
+- 订阅复用、恢复和失效规则必须有回归测试；不要仅靠时间防抖。
+- 安装后的命令必须独立于源码路径。更新安装行为时测试移动/删除源码的情况。
+- 变更面向用户的行为时同步 README、排障文档和 CHANGELOG。
+- 使用 AI 辅助的贡献可以接受，提交者仍须理解代码并如实报告验证。不要把私密对话或工具日志提交到仓库。
+
+项目目前由个人维护，不承诺固定响应时限。提交贡献即表示你有权提交该内容，并同意按本项目 MIT 许可证发布；无需额外签署 CLA。

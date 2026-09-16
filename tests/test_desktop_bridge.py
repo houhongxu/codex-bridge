@@ -1,0 +1,348 @@
+import asyncio
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+from unittest.mock import AsyncMock, Mock, patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from desktop_bridge import DesktopAttacher, DesktopSubscriptions, Relay, relay_authorized
+from websockets.asyncio.client import connect
+from websockets.asyncio.server import serve
+
+
+THREAD_A = "00000000-0000-4000-8000-000000000001"
+THREAD_B = "00000000-0000-4000-8000-000000000002"
+
+
+class RelayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_plain_address_accepts_bearer_and_rejects_missing_or_wrong_token(self):
+        accepted = []
+
+        async def handler(ws):
+            if not relay_authorized(ws.request, "test-token"):
+                await ws.close(1008, "Unknown local relay")
+                return
+            accepted.append(True)
+            await ws.send("accepted")
+
+        async with serve(handler, "127.0.0.1", 0, origins=[None]) as server:
+            endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+            for header in [None, "Bearer wrong"]:
+                headers = {} if header is None else {"Authorization": header}
+                async with connect(endpoint, proxy=None, additional_headers=headers) as client:
+                    await client.wait_closed()
+                    self.assertEqual(client.close_code, 1008)
+            async with connect(endpoint, proxy=None, additional_headers={"Authorization": "Bearer test-token"}) as client:
+                self.assertEqual(await client.recv(), "accepted")
+            self.assertEqual(accepted, [True])
+
+    async def test_routes_own_threads_and_preserves_rpc_and_approvals(self):
+        received = []
+        attached = []
+        progress = '{"method":"item/agentMessage/delta","params":{"threadId":"' + THREAD_A + '","delta":"working"}}'
+
+        async def attach(thread_id):
+            attached.append(thread_id)
+
+        async def backend(ws):
+            async for raw in ws:
+                received.append(raw)
+                message = json.loads(raw)
+                if message.get("method") == "thread/start":
+                    # Global notifications for a different CLI must not attach it.
+                    await ws.send(json.dumps({"method": "thread/started", "params": {"thread": {"id": THREAD_B}}}))
+                    await ws.send(json.dumps({"id": message["id"], "result": {"thread": {"id": THREAD_A, "ephemeral": False}}}))
+                elif message.get("method") == "turn/start":
+                    await ws.send(json.dumps({"id": message["id"], "result": {"turn": {"id": "turn-1"}}}))
+                    await ws.send('{"id":"approval-1","method":"item/commandExecution/requestApproval","params":{"threadId":"' + THREAD_A + '"}}')
+                elif message.get("id") == "approval-1":
+                    await ws.send('{"method":"serverRequest/resolved","params":{"requestId":"approval-1"}}')
+                    await ws.send(progress)
+
+        async with serve(backend, "127.0.0.1", 0) as server:
+            endpoint = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+            relay = Relay(endpoint, attach)
+            async with serve(relay.handle, "127.0.0.1", 0) as front:
+                async with connect(f"ws://127.0.0.1:{front.sockets[0].getsockname()[1]}", proxy=None) as client:
+                    start = '{"id":1, "method":"thread/start", "params":{"cwd":"/a project"}}'
+                    await client.send(start)
+                    notification = json.loads(await client.recv())
+                    self.assertEqual(notification["params"]["thread"]["id"], THREAD_B)
+                    self.assertEqual(json.loads(await client.recv())["id"], 1)
+                    self.assertEqual(attached, [THREAD_A])
+                    turn = json.dumps({"id": 2, "method": "turn/start", "params": {"threadId": THREAD_A, "input": []}})
+                    await client.send(turn)
+                    self.assertEqual(json.loads(await client.recv())["id"], 2)
+                    approval = json.loads(await client.recv())
+                    self.assertEqual(approval["id"], "approval-1")
+                    answer = '{"id":"approval-1", "result":{"decision":"decline"}}'
+                    await client.send(answer)
+                    await client.recv()
+                    self.assertEqual(await client.recv(), progress)
+                    self.assertEqual(received, [start, turn, answer])
+                    self.assertEqual(attached, [THREAD_A, THREAD_A])
+
+    async def test_concurrent_clients_do_not_mix_response_ids_or_error_results(self):
+        attached = []
+
+        async def attach(thread_id):
+            attached.append(thread_id)
+
+        async def backend(ws):
+            async for raw in ws:
+                message = json.loads(raw)
+                params = message["params"]
+                response = {"id": message["id"], "result": {"thread": {"id": params["threadId"], "ephemeral": False}}}
+                if params.get("fail"):
+                    response = {"id": message["id"], "error": {"code": -1, "message": "test failure"}}
+                await ws.send(json.dumps(response))
+
+        async with serve(backend, "127.0.0.1", 0) as server:
+            relay = Relay(f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}", attach)
+            async with serve(relay.handle, "127.0.0.1", 0) as front:
+                endpoint = f"ws://127.0.0.1:{front.sockets[0].getsockname()[1]}"
+
+                async def resume(thread_id, fail=False):
+                    async with connect(endpoint, proxy=None) as client:
+                        await client.send(json.dumps({"id": 1, "method": "thread/resume", "params": {"threadId": thread_id, "fail": fail}}))
+                        return json.loads(await client.recv())
+
+                a, b = await asyncio.gather(resume(THREAD_A), resume(THREAD_B))
+                self.assertEqual(a["result"]["thread"]["id"], THREAD_A)
+                self.assertEqual(b["result"]["thread"]["id"], THREAD_B)
+                self.assertCountEqual(attached, [THREAD_A, THREAD_B])
+                error = await resume(THREAD_A, True)
+                self.assertIn("error", error)
+                self.assertEqual(len(attached), 2)
+
+    async def test_ephemeral_and_unknown_threads_never_trigger_desktop_links(self):
+        attached = []
+        received = []
+
+        async def attach(thread_id):
+            attached.append(thread_id)
+
+        async def backend(ws):
+            async for raw in ws:
+                received.append(raw)
+                message = json.loads(raw)
+                params = message.get("params", {})
+                if message["method"] == "thread/start":
+                    thread = {"id": THREAD_B}
+                    if params.get("omitEphemeral") is not True:
+                        thread["ephemeral"] = params.get("responseEphemeral", True)
+                    result = {"thread": thread}
+                else:
+                    result = {"turn": {"id": "temporary-turn"}}
+                await ws.send(json.dumps({"id": message["id"], "result": result}))
+
+        async with serve(backend, "127.0.0.1", 0) as server:
+            relay = Relay(f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}", attach)
+            async with serve(relay.handle, "127.0.0.1", 0) as front:
+                async with connect(f"ws://127.0.0.1:{front.sockets[0].getsockname()[1]}", proxy=None) as client:
+                    sent = []
+                    async def request(request_id, method, params):
+                        raw = json.dumps({"id": request_id, "method": method, "params": params})
+                        sent.append(raw)
+                        await client.send(raw)
+                        response = json.loads(await client.recv())
+                        self.assertEqual(response["id"], request_id)
+
+                    # Reproduces the reported bug: start was ignored correctly,
+                    # but the very next turn/start still opened the temporary ID.
+                    await request(1, "thread/start", {"ephemeral": True})
+                    self.assertEqual(attached, [])
+                    await request(2, "turn/start", {"threadId": THREAD_B, "input": []})
+                    self.assertEqual(attached, [])
+                    # No successful start/resume/fork for this ID on this client.
+                    await request(3, "turn/start", {"threadId": THREAD_A, "input": []})
+                    self.assertEqual(attached, [])
+                    # Missing type metadata must not make a task attachable.
+                    await request(4, "thread/start", {"omitEphemeral": True})
+                    await request(5, "turn/start", {"threadId": THREAD_B, "input": []})
+                    self.assertEqual(attached, [])
+                    # Explicit temporary requests remain temporary even if a
+                    # mismatched response unexpectedly says otherwise.
+                    await request(6, "thread/start", {"ephemeral": True, "responseEphemeral": False})
+                    await request(7, "turn/start", {"threadId": THREAD_B, "input": []})
+                    self.assertEqual(attached, [])
+                    self.assertEqual(received, sent)
+
+
+class DesktopAttachmentTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.logs = self.home / "Library/Logs/com.openai.codex/2026/09/16"
+        self.logs.mkdir(parents=True)
+        self.path = self.logs / f"codex-desktop-session-one-{os.getpid()}-t0-i1-120000-0.log"
+        self.path.touch()
+        self.tick = 0
+        self.attacher = DesktopAttacher("/Applications/Test.app", self.home)
+        self.attacher.CONFIRM_TIMEOUT = 0
+        self.now = 1000
+        timer = patch("desktop_bridge.time", Mock(monotonic=lambda: self.now))
+        timer.start()
+        self.addCleanup(timer.stop)
+        self.opened = []
+        self.confirm_on_open = True
+        self.open_code = 0
+
+        async def open_task(*args, **kwargs):
+            thread_id = args[-1].rsplit("/", 1)[1]
+            self.opened.append(thread_id)
+            if self.confirm_on_open and self.open_code == 0:
+                self.emit(f"maybe_resume_success conversationId={thread_id} assignedStreamRole=owner")
+            return Mock(wait=AsyncMock(return_value=self.open_code))
+
+        opener = patch("desktop_bridge.asyncio.create_subprocess_exec", side_effect=open_task)
+        opener.start()
+        self.addCleanup(opener.stop)
+
+    def emit(self, event, complete=True):
+        self.tick += 1
+        with self.path.open("a") as stream:
+            stream.write(f"2026-09-16T12:00:00.{self.tick:03d}Z info [test] {event}" + ("\n" if complete else ""))
+
+    async def test_continuous_turns_and_switching_views_open_only_once(self):
+        await self.attacher(THREAD_A)
+        self.emit(f"thread_stream_view_activity_changed conversationId={THREAD_A} active=false resumeState=resumed streamRole=owner")
+        for elapsed in [3, 60, 3600]:
+            self.now += elapsed
+            await self.attacher(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A])
+        record = self.home / f"Library/Application Support/Codex CLI Bridge/attachments/{THREAD_A}.json"
+        self.assertEqual(json.loads(record.read_text())["status"], "subscription_confirmed")
+
+    async def test_unsubscribe_reopens_only_the_affected_task(self):
+        await self.attacher(THREAD_A)
+        await self.attacher(THREAD_B)
+        self.emit(f"inactive_thread_unsubscribed conversationId={THREAD_A} status=unsubscribed")
+        await self.attacher(THREAD_B)
+        await self.attacher(THREAD_A)
+        await self.attacher(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A, THREAD_B, THREAD_A])
+
+    async def test_local_reconnect_invalidates_but_remote_host_does_not(self):
+        await self.attacher(THREAD_A)
+        self.emit("app_server_connection.state_changed hostId=remote next=disconnected")
+        await self.attacher(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A])
+        self.emit("app_server_connection.state_changed hostId=local next=disconnected")
+        self.emit("app_server_connection.state_changed hostId=local next=connected")
+        await self.attacher(THREAD_A)
+        await self.attacher(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A, THREAD_A])
+
+    async def test_desktop_restart_reopens_and_old_records_are_not_trusted(self):
+        await self.attacher(THREAD_A)
+        self.path = self.logs / f"codex-desktop-session-two-{os.getpid()}-t0-i1-120100-0.log"
+        self.emit("app_server_connection.state_changed hostId=local next=connected")
+        await self.attacher(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A, THREAD_A])
+
+    async def test_cli_restart_reuses_current_desktop_evidence(self):
+        await self.attacher(THREAD_A)
+        another = DesktopAttacher("/Applications/Test.app", self.home)
+        await another(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A])
+        self.emit(f"inactive_thread_unsubscribed conversationId={THREAD_A} status=unsubscribed")
+        another = DesktopAttacher("/Applications/Test.app", self.home)
+        await another(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A, THREAD_A])
+
+    async def test_unconfirmed_open_backs_off_and_late_confirmation_is_reused(self):
+        self.confirm_on_open = False
+        await self.attacher(THREAD_A)
+        self.now += 10
+        await self.attacher(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A])
+        self.now += 60
+        await self.attacher(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A, THREAD_A])
+        self.emit(f"maybe_resume_success conversationId={THREAD_A} assignedStreamRole=owner")
+        self.now += 100
+        await self.attacher(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A, THREAD_A])
+
+    async def test_failed_open_can_recover_without_opening_on_each_input(self):
+        self.open_code = 1
+        await self.attacher(THREAD_A)
+        self.now += 3
+        await self.attacher(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A])
+        self.open_code = 0
+        self.now += 60
+        await self.attacher(THREAD_A)
+        await self.attacher(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A, THREAD_A])
+
+    async def test_invalid_thread_never_opens_desktop(self):
+        await self.attacher("invalid")
+        await self.attacher(None)
+        self.assertEqual(self.opened, [])
+
+    def test_partial_lines_and_success_then_unsubscribe_in_one_read(self):
+        state = self.attacher.subscriptions
+        self.emit(f"maybe_resume_success conversationId={THREAD_A} assignedStreamRole=owner", complete=False)
+        state.refresh()
+        self.assertNotIn(THREAD_A, state.confirmed)
+        with self.path.open("a") as stream:
+            stream.write("\n")
+        state.refresh()
+        self.assertIn(THREAD_A, state.confirmed)
+        self.emit(f"maybe_resume_success conversationId={THREAD_B} assignedStreamRole=owner")
+        self.emit(f"inactive_thread_unsubscribed conversationId={THREAD_A} status=unsubscribed")
+        state.refresh()
+        self.assertNotIn(THREAD_A, state.confirmed)
+        self.assertIn(THREAD_B, state.confirmed)
+
+    async def test_rotation_keeps_subscription_but_reads_unsubscribe_in_new_file(self):
+        await self.attacher(THREAD_A)
+        self.path = self.logs / f"codex-desktop-session-one-{os.getpid()}-t0-i1-120000-1.log"
+        self.emit("irrelevant_event detail=rotation")
+        await self.attacher(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A])
+        self.emit(f"inactive_thread_unsubscribed conversationId={THREAD_A} status=unsubscribed")
+        await self.attacher(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A, THREAD_A])
+
+    async def test_truncation_does_not_keep_old_confirmation(self):
+        await self.attacher(THREAD_A)
+        self.path.write_text("")
+        await self.attacher(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A, THREAD_A])
+
+    def test_dead_desktop_does_not_restore_historical_confirmation(self):
+        self.emit(f"maybe_resume_success conversationId={THREAD_A} assignedStreamRole=owner")
+        state = self.attacher.subscriptions
+        state.refresh()
+        self.assertIn(THREAD_A, state.confirmed)
+        with patch("desktop_bridge.os.kill", side_effect=ProcessLookupError):
+            state.refresh()
+        self.assertEqual(state.confirmed, set())
+
+    async def test_missing_rotations_do_not_keep_unverifiable_subscription(self):
+        await self.attacher(THREAD_A)
+        # More than four new files: the unsubscribe may be outside the retained
+        # scan window. Reattach conservatively instead of trusting cached state.
+        for i in range(1, 6):
+            self.path = self.logs / f"codex-desktop-session-one-{os.getpid()}-t0-i1-120000-{i}.log"
+            self.emit("irrelevant_event detail=rotation")
+        await self.attacher(THREAD_A)
+        self.assertEqual(self.opened, [THREAD_A, THREAD_A])
+
+    def test_skipped_log_range_does_not_replay_older_confirmation(self):
+        self.emit(f"maybe_resume_success conversationId={THREAD_A} assignedStreamRole=owner")
+        self.path = self.logs / f"codex-desktop-session-one-{os.getpid()}-t0-i1-120000-1.log"
+        self.emit(f"inactive_thread_unsubscribed conversationId={THREAD_A} status=unsubscribed")
+        for _ in range(8):
+            self.emit("irrelevant_event detail=padding")
+        state = self.attacher.subscriptions
+        state.MAX_READ = 200
+        state.refresh()
+        self.assertNotIn(THREAD_A, state.confirmed)
