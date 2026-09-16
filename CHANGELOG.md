@@ -6,6 +6,20 @@
 
 暂无已合入的未发布行为变更。
 
+## [0.1.0-alpha.2] - 2026-09-16
+
+### Added
+
+- 实时异步提问兼容层：桌面回答后关闭 CLI 对应提问框；CLI 回答转换为同一任务的桌面兼容消息，无需修改官方 CLI。
+- 按连接、任务及问题隔离，已知重复/迟到回答去重；提交失败提示用户检查桌面，不自动重试。
+- `CPET_QUESTION_SYNC=0` 关闭适配并恢复原始转发；安装器部署独立的 `question_sync.py`。
+
+### Known limitations
+
+- 仅适配连接后收到的实时问题；历史文本保留，历史未答问题需在桌面回答。
+- 标准 CLI 提问框的 `Esc` 保留中断行为；两端完全同时作答没有原子去重保证。
+- 原版 CLI `0.154.0-alpha.6.2` 已通过合成事件驱动的真实终端 UI 探针，真实桌面点击与模型的完整端到端验收尚未完成。
+
 ## [0.1.0-alpha.1] - 2026-09-16
 
 ### Added
@@ -22,5 +36,6 @@
 
 首次订阅可能导航桌面；日志确认不等同于宠物可见；共享后台的文件权限、代理及桌面工具上下文可能与内置后台不同。详见兼容性文档。
 
-[Unreleased]: https://github.com/houhongxu/cpet/compare/v0.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/houhongxu/cpet/compare/v0.1.0-alpha.2...HEAD
+[0.1.0-alpha.2]: https://github.com/houhongxu/cpet/releases/tag/v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/houhongxu/cpet/releases/tag/v0.1.0-alpha.1
