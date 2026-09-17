@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from desktop_bridge import Relay
-from question_sync import CLOSE, OPEN, QuestionSync, answered_ids, question_key
+from question_sync import CLOSE, OPEN, QuestionSync, answered_ids, display_reply, question_key
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
@@ -19,7 +19,8 @@ TURN = "00000000-0000-4000-8000-000000000003"
 
 
 def question_event(count=1, method="item/completed", thread=THREAD, item_id="call-example"):
-    return {"method": method, "params": {"threadId": thread, "turnId": TURN, "item": {
+    timestamp = "startedAtMs" if method == "item/started" else "completedAtMs"
+    return {"method": method, "params": {timestamp: 0, "threadId": thread, "turnId": TURN, "item": {
         "type": "agentMessage", "id": item_id, "delivery": "async", "phase": "final_answer",
         "text": "Original question text", "questions": [
             {"title": "Choose scope " + str(i), "options": ["Current task", "All tasks"]}
@@ -29,7 +30,7 @@ def question_event(count=1, method="item/completed", thread=THREAD, item_id="cal
 def desktop_answer(indices=(0,), thread=THREAD, item_id="call-example"):
     values = [{"questionItemId": question_key(item_id, i), "question": "Choose scope " + str(i),
                "answer": "Current task"} for i in indices]
-    return {"method": "item/completed", "params": {"threadId": thread, "turnId": TURN,
+    return {"method": "item/completed", "params": {"completedAtMs": 0, "threadId": thread, "turnId": TURN,
         "item": {"type": "userMessage", "id": "user-answer", "content": [{"type": "text",
                   "text": OPEN + "\n" + json.dumps(values) + "\n" + CLOSE}]}}}
 
@@ -57,8 +58,11 @@ class QuestionSyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_desktop_answer_dismisses_only_matching_question_without_submission(self):
         requests = self.create(count=2)
         original = desktop_answer(indices=(1,))
+        saved = copy.deepcopy(original)
         forwarded, extra = self.sync.from_backend(original)
-        self.assertIs(forwarded, original)
+        self.assertEqual(forwarded["params"]["item"]["content"][0]["text"],
+                         "问题：Choose scope 1\n你的回答：Current task")
+        self.assertEqual(original, saved)
         self.assertEqual(extra, [{"method": "serverRequest/resolved", "params": {
             "threadId": THREAD, "requestId": requests[1]["id"]}}])
         self.assertEqual(len(self.sync.questions), 1)
@@ -222,6 +226,106 @@ class QuestionSyncTests(unittest.IsolatedAsyncioTestCase):
         item["content"][0]["text"] = "Example: " + item["content"][0]["text"]
         self.assertEqual(answered_ids(item), [])
 
+    async def test_started_and_completed_reply_have_same_readable_display(self):
+        request = self.create()[0]
+        event = desktop_answer()
+        event["method"] = "item/started"
+        shown, extra = self.sync.from_backend(event)
+        self.assertEqual(extra, [])
+        self.assertEqual(len(self.sync.questions), 1)
+        event["method"] = "item/completed"
+        completed, extra = self.sync.from_backend(event)
+        self.assertEqual(shown["params"]["item"], completed["params"]["item"])
+        self.assertEqual(extra[0]["params"]["requestId"], request["id"])
+
+    async def test_reply_history_across_resume_read_and_pagination_is_readable(self):
+        reply = desktop_answer()["params"]["item"]
+        tool = {"type": "dynamicToolCall", "arguments": {"nested": copy.deepcopy(reply)}}
+        turn = {"id": TURN, "items": [reply, tool]}
+        cases = [
+            (None, {"thread": {"id": THREAD, "turns": [turn]}}),
+            (None, {"thread": {"id": THREAD}, "initialTurnsPage": {"data": [turn]}}),
+            ("thread/read", {"thread": {"id": THREAD, "turns": [turn]}}),
+            ("thread/turns/list", {"data": [turn]}),
+            ("thread/items/list", {"data": [{"item": reply}, {"item": tool}]}),
+        ]
+        for index, (method, result) in enumerate(cases):
+            with self.subTest(method=method, index=index):
+                if method:
+                    await self.sync.from_cli({"id": index, "method": method, "params": {"threadId": THREAD}})
+                original = {"id": index, "result": copy.deepcopy(result)}
+                saved = copy.deepcopy(original)
+                shown, extra = self.sync.from_backend(original)
+                if "initialTurnsPage" in shown["result"]:
+                    items = shown["result"]["initialTurnsPage"]["data"][0]["items"]
+                elif "thread" in shown["result"]:
+                    items = shown["result"]["thread"]["turns"][0]["items"]
+                elif method == "thread/turns/list":
+                    items = shown["result"]["data"][0]["items"]
+                else:
+                    items = [v["item"] for v in shown["result"]["data"]]
+                self.assertEqual(items[0]["content"][0]["text"], "问题：Choose scope 0\n你的回答：Current task")
+                self.assertEqual(items[1], tool)
+                self.assertEqual(original, saved)
+                self.assertEqual(extra, [])
+                self.assertEqual(self.sync.questions, {})
+
+    async def test_display_is_not_applied_to_outgoing_input_or_other_threads(self):
+        event = desktop_answer(thread=OTHER)
+        self.assertIs(self.sync.from_backend(event)[0], event)
+        outgoing = {"id": 5, "method": "turn/start", "params": {
+            "threadId": THREAD, "input": event["params"]["item"]["content"]}}
+        saved = copy.deepcopy(outgoing)
+        self.assertFalse(await self.sync.from_cli(outgoing))
+        self.assertEqual(outgoing, saved)
+
+
+class ReplyDisplayTests(unittest.TestCase):
+    def make_reply(self, values):
+        item = desktop_answer()["params"]["item"]
+        item["content"][0]["text"] = OPEN + "\n" + json.dumps(values, ensure_ascii=False) + "\n" + CLOSE
+        return item
+
+    def test_multiple_answers_preserve_unicode_newlines_and_metadata(self):
+        values = [{"questionItemId": question_key("call-example", i), "question": title, "answer": answer}
+                  for i, (title, answer) in enumerate([("保留哪些页面？", "列表和模板\n其他模块保持不变"),
+                                                      ("何时发布？", "测试完成后")])]
+        item = self.make_reply(values)
+        item["clientId"] = "example-client"
+        item["content"][0]["text_elements"] = [{"byteRange": {"start": 0, "end": 5}}]
+        saved = copy.deepcopy(item)
+        shown = display_reply(item)
+        self.assertEqual(shown["content"][0]["text"],
+                         "问题：保留哪些页面？\n你的回答：列表和模板\n其他模块保持不变\n\n问题：何时发布？\n你的回答：测试完成后")
+        self.assertEqual(shown["id"], item["id"])
+        self.assertEqual(shown["clientId"], item["clientId"])
+        self.assertEqual(shown["content"][0]["text_elements"], [])
+        self.assertEqual(item, saved)
+
+    def test_single_object_reply_is_also_readable(self):
+        item = self.make_reply({"questionItemId": question_key("call-example", 0),
+                                "question": "Choose scope", "answer": "Current task"})
+        self.assertEqual(display_reply(item)["content"][0]["text"],
+                         "问题：Choose scope\n你的回答：Current task")
+
+    def test_unknown_malformed_mixed_and_quoted_envelopes_pass_unchanged(self):
+        valid = {"questionItemId": question_key("call-example", 0), "question": "Scope?", "answer": "Current"}
+        for value in [[], [None], [dict(valid, extra="preserve")], [dict(valid, question=None)],
+                      [dict(valid, questionItemId="invalid")], [dict(valid, answer=123)],
+                      [valid, {"questionItemId": "invalid"}]]:
+            item = self.make_reply(value)
+            self.assertIs(display_reply(item), item)
+        for prefix, suffix in [("Example: ", ""), ("```\n", "\n```")]:
+            item = self.make_reply([valid])
+            item["content"][0]["text"] = prefix + item["content"][0]["text"] + suffix
+            self.assertIs(display_reply(item), item)
+        item = self.make_reply([valid])
+        item["type"] = "agentMessage"
+        self.assertIs(display_reply(item), item)
+        item["type"] = "userMessage"
+        item["content"].append({"type": "image", "url": "example"})
+        self.assertIs(display_reply(item), item)
+
 
 class QuestionRelayTests(unittest.IsolatedAsyncioTestCase):
     async def test_official_wire_flow_with_cli_answer_and_desktop_answer(self):
@@ -239,6 +343,9 @@ class QuestionRelayTests(unittest.IsolatedAsyncioTestCase):
                 elif msg.get("method") == "turn/steer":
                     answer_rpc.set()
                     await ws.send(json.dumps({"id": msg["id"], "result": {"turnId": TURN}}))
+                    await ws.send(json.dumps({"method": "item/completed", "params": {
+                        "completedAtMs": 0, "threadId": THREAD, "turnId": TURN, "item": {"id": "cli-answer", "type": "userMessage",
+                            "content": msg["params"]["input"]}}}))
 
         async with serve(backend, "127.0.0.1", 0) as server:
             relay = Relay(f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}", AsyncMock())
@@ -249,21 +356,30 @@ class QuestionRelayTests(unittest.IsolatedAsyncioTestCase):
                     item = json.loads(await cli.recv())
                     self.assertIsNone(item["params"]["item"]["questions"])
                     first, second = [json.loads(await cli.recv()) for _ in range(2)]
-                    await cli.recv()  # Original desktop answer.
+                    desktop_reply = json.loads(await cli.recv())
+                    self.assertEqual(desktop_reply["params"]["item"]["content"][0]["text"],
+                                     "问题：Choose scope 0\n你的回答：Current task")
                     resolved = json.loads(await cli.recv())
                     self.assertEqual(resolved["params"]["requestId"], first["id"])
                     await cli.send(json.dumps(cli_answer(first)))  # Stale answer is consumed.
                     await cli.send(json.dumps(cli_answer(second)))
                     await asyncio.wait_for(answer_rpc.wait(), 2)
-                    resolved = json.loads(await asyncio.wait_for(cli.recv(), 2))
+                    frames = [json.loads(await asyncio.wait_for(cli.recv(), 2)) for _ in range(2)]
+                    resolved = next(f for f in frames if f["method"] == "serverRequest/resolved")
                     self.assertEqual(resolved["params"]["requestId"], second["id"])
+                    reply = next(f for f in frames if f["method"] == "item/completed")
+                    self.assertEqual(reply["params"]["item"]["content"][0]["text"],
+                                     "问题：Choose scope 1\n你的回答：Current task")
         self.assertEqual([m.get("method") for m in received], ["thread/resume", "turn/steer"])
+        self.assertTrue(received[-1]["params"]["input"][0]["text"].startswith(OPEN))
 
     async def test_opt_out_preserves_native_question_and_rpc(self):
         event = json.dumps(question_event())
+        answer = json.dumps(desktop_answer())
         async def backend(ws):
             await ws.recv()
             await ws.send(event)
+            await ws.send(answer)
             await ws.wait_closed()
         async with serve(backend, "127.0.0.1", 0) as server:
             relay = Relay(f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}", AsyncMock(), question_sync=False)
@@ -271,3 +387,4 @@ class QuestionRelayTests(unittest.IsolatedAsyncioTestCase):
                 async with connect(f"ws://127.0.0.1:{front.sockets[0].getsockname()[1]}", proxy=None) as cli:
                     await cli.send('{"id":1,"method":"initialize","params":{}}')
                     self.assertEqual(await cli.recv(), event)
+                    self.assertEqual(await cli.recv(), answer)

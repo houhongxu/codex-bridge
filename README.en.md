@@ -7,7 +7,7 @@
 
 [简体中文](README.md) · English · [Architecture](docs/architecture.md) · [Troubleshooting](docs/troubleshooting.md)
 
-> Experimental: **0.1.0-alpha.2**. This is a community project, not affiliated with or endorsed by OpenAI. Desktop deep links, external-server configuration and log formats are version-dependent. Attaching a task can navigate the desktop to that task.
+> Experimental: **0.1.0-alpha.3**. This is a community project, not affiliated with or endorsed by OpenAI. Desktop deep links, external-server configuration and log formats are version-dependent. Attaching a task can navigate the desktop to that task.
 
 ## What it does
 
@@ -58,6 +58,8 @@ Since `0.1.0-alpha.2`, new `cx` sessions adapt **live async questions received a
 The CLI uses its standard question dialog, including its `Esc` interruption behavior. Historical question text is retained, but old dialogs are not recreated; answer outstanding historical questions in Desktop. Known duplicate or late answers are suppressed, but simultaneous submissions from two clients are not atomically coordinated.
 
 If cpet cannot confirm an answer, check Desktop before replying again: it never retries automatically. To restore native question passthrough, run `CPET_QUESTION_SYNC=0 cx resume --all`. Restart old CLI sessions after upgrading. See [tested versions and limits](docs/compatibility.md).
+
+Since `0.1.0-alpha.3`, recognized answer envelopes appear as readable question/answer text in live CLI messages and restored history, using the labels `问题：` (Question) and `你的回答：` (Your answer). IDs and JSON remain intact in backend storage and submitted messages. Only the CLI-facing copy is formatted; ordinary text, quoted examples and unknown formats pass through. `CPET_QUESTION_SYNC=0` also disables this formatting.
 
 ## Installed files are independent of the checkout
 
