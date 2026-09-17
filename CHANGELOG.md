@@ -6,6 +6,14 @@
 
 暂无已合入的未发布行为变更。
 
+## [0.1.0-alpha.3] - 2026-09-17
+
+### Fixed
+
+- CLI 实时消息和恢复的历史记录将标准问答回复显示为“问题 / 你的回答”，隐藏同步标签、问题编号和 JSON。
+- 保留后台存储及提交内容，关闭通知仍按原问题编号匹配。普通消息、引用示例、附件及未知格式原样传递；退出适配同时停用排版。
+- 补充“安装版本不等于旧终端加载版本”的排障说明。
+
 ## [0.1.0-alpha.2] - 2026-09-16
 
 ### Added
@@ -36,6 +44,7 @@
 
 首次订阅可能导航桌面；日志确认不等同于宠物可见；共享后台的文件权限、代理及桌面工具上下文可能与内置后台不同。详见兼容性文档。
 
-[Unreleased]: https://github.com/houhongxu/cpet/compare/v0.1.0-alpha.2...HEAD
+[Unreleased]: https://github.com/houhongxu/cpet/compare/v0.1.0-alpha.3...HEAD
+[0.1.0-alpha.3]: https://github.com/houhongxu/cpet/releases/tag/v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/houhongxu/cpet/releases/tag/v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/houhongxu/cpet/releases/tag/v0.1.0-alpha.1

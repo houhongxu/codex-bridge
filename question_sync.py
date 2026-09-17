@@ -25,8 +25,8 @@ def question_key(message_id, index):
     return json.dumps(["request_user_input_async", message_id, index], separators=(",", ":"))
 
 
-def answered_ids(item):
-    """Accept only the desktop's complete reply envelope in a user message."""
+def reply_values(item):
+    """Parse only a complete reply envelope in a single user text item."""
     if item.get("type") != "userMessage":
         return []
     content = item.get("content")
@@ -49,8 +49,13 @@ def answered_ids(item):
         values = [values]
     if not isinstance(values, list):
         return []
+    return values
+
+
+def answered_ids(item):
+    """Accept only the desktop's complete reply envelope in a user message."""
     result = []
-    for value in values:
+    for value in reply_values(item):
         if not isinstance(value, dict) or not isinstance(value.get("answer"), str):
             continue
         try:
@@ -63,6 +68,28 @@ def answered_ids(item):
                 and identity[2] >= 0):
             result.append(question_key(identity[1], identity[2]))
     return result
+
+
+def display_reply(item):
+    """Format a CLI-facing copy; never change the submitted/backend message."""
+    values = reply_values(item)
+    if not values or len(answered_ids(item)) != len(values):
+        return item
+    # Unknown fields may carry information we cannot represent. Preserve those
+    # envelopes, malformed entries and quoted examples without partial rewriting.
+    if any(set(value) != {"questionItemId", "question", "answer"}
+           or not isinstance(value.get("question"), str) or not value["question"].strip()
+           for value in values):
+        return item
+    updated = copy.deepcopy(item)
+    part = updated["content"][0]
+    part["text"] = "\n\n".join(
+        "问题：" + value["question"] + "\n你的回答：" + value["answer"]
+        for value in values)
+    # Original offsets refer to the JSON envelope, not the formatted text.
+    if "text_elements" in part:
+        part["text_elements"] = []
+    return updated
 
 
 def async_questions(item):
@@ -86,7 +113,7 @@ def async_questions(item):
 
 
 def without_history_questions(message, method=None):
-    """Keep historical text intact without restoring the CLI's stale local panel.
+    """Format answer envelopes without restoring the CLI's stale local panel.
 
     History pages are not a complete pending-question ledger. Only live questions
     are made interactive; historic questions can still be answered in Desktop.
@@ -109,8 +136,14 @@ def without_history_questions(message, method=None):
                      if isinstance(entry, dict))
     changed = False
     for item in items:
-        if isinstance(item, dict) and async_questions(item) is not None:
+        if not isinstance(item, dict):
+            continue
+        if async_questions(item) is not None:
             item["questions"] = None
+            changed = True
+        displayed = display_reply(item)
+        if displayed is not item:
+            item.update(displayed)
             changed = True
     return updated if changed else message
 
@@ -237,6 +270,10 @@ class QuestionSync:
                 question = self.complete((tid, identity))
                 if question is not None:
                     extras.append(self.resolved(question))
+        displayed = display_reply(item)
+        if displayed is not item:
+            message = copy.deepcopy(message)
+            message["params"]["item"] = displayed
         questions = async_questions(item)
         if questions is None or not isinstance(params.get("turnId"), str):
             return message, extras

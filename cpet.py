@@ -18,7 +18,7 @@ import time
 import urllib.error
 import urllib.request
 
-__version__ = "0.1.0-alpha.2"
+__version__ = "0.1.0-alpha.3"
 
 ENDPOINT = "ws://127.0.0.1:4500"
 ENV_KEY = "CODEX_APP_SERVER_WS_URL"
