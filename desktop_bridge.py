@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import secrets
 import signal
+import stat
 import time
 import uuid
 
@@ -220,24 +221,87 @@ class DesktopAttacher:
             self.record(thread_id, "opened_unconfirmed")
 
 
+def rollout_ready(path):
+    """The advertised path can precede creation of a new thread's JSONL file."""
+    try:
+        if not path.is_file():
+            return False
+        # Nonblocking open also avoids hanging RPC if the path becomes a FIFO.
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                return False
+            first = stream.readline(1024 * 1024)
+        if not first.endswith(b"\n"):
+            return False
+        metadata = object_message(first)
+        return metadata.get("type") == "session_meta" and isinstance(metadata.get("payload"), dict)
+    except (OSError, ValueError):
+        return False
+
+
+class PersistedAttachments:
+    """Wait for local history without blocking either RPC forwarding loop."""
+    WAIT_TIMEOUT = 10
+    POLL_INTERVAL = 0.1
+
+    def __init__(self, attach):
+        self.attach = attach
+        self.paths = {}
+        self.tasks = {}
+
+    def track(self, thread, requested_ephemeral):
+        thread_id = thread.get("id")
+        self.paths.pop(thread_id, None)
+        path = thread.get("path")
+        if (thread.get("ephemeral") is False and not requested_ephemeral
+                and isinstance(path, str) and path and Path(path).is_absolute()):
+            self.paths[thread_id] = Path(path)
+            # Empty new threads should stay idle until their first turn.
+            self.schedule(thread_id, wait=False)
+
+    def schedule(self, thread_id, wait=True):
+        path = self.paths.get(thread_id)
+        if path is None or thread_id in self.tasks:
+            return
+        if not wait and not rollout_ready(path):
+            return
+        self.tasks[thread_id] = asyncio.create_task(self.run(thread_id))
+
+    async def run(self, thread_id):
+        try:
+            deadline = time.monotonic() + self.WAIT_TIMEOUT
+            while thread_id in self.paths:
+                if rollout_ready(self.paths[thread_id]):
+                    await self.attach(thread_id)
+                    return
+                if time.monotonic() >= deadline:
+                    return  # A later CLI turn can retry; never open missing history.
+                await asyncio.sleep(self.POLL_INTERVAL)
+        except Exception as exc:
+            print(f"desktop attach failed: {type(exc).__name__}", file=__import__("sys").stderr, flush=True)
+        finally:
+            self.tasks.pop(thread_id, None)
+
+    async def close(self):
+        tasks = list(self.tasks.values())
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self.tasks.clear()
+
+
 class Relay:
     def __init__(self, upstream, attach, question_sync=True):
         self.upstream = upstream
         self.attach = attach
         self.question_sync = question_sync
 
-    async def safely_attach(self, thread_id):
-        try:
-            await self.attach(thread_id)
-        except Exception as exc:
-            # A UI failure must not break CLI RPC or alter an approval decision.
-            print(f"desktop attach failed: {type(exc).__name__}", file=__import__("sys").stderr, flush=True)
-
     async def handle(self, downstream):
         pending = {}
         # Only tasks this CLI successfully created/resumed/forked, with an
         # explicit non-ephemeral response, can be opened in the desktop.
-        attachable = set()
+        attachments = PersistedAttachments(self.attach)
         async with connect(self.upstream, proxy=None, compression=None,
                            max_size=None, close_timeout=2) as upstream:
             async def send_cli(message):
@@ -245,6 +309,8 @@ class Relay:
 
             async def send_backend(message):
                 await upstream.send(json.dumps(message, ensure_ascii=False))
+                if message.get("method") == "turn/start":
+                    attachments.schedule(message.get("params", {}).get("threadId"))
 
             questions = QuestionSync(send_cli, send_backend) if self.question_sync else None
 
@@ -256,11 +322,9 @@ class Relay:
                     method = message.get("method")
                     if method in {"thread/start", "thread/resume", "thread/fork"} and "id" in message:
                         pending[message["id"]] = message.get("params", {}).get("ephemeral") is True
-                    elif method == "turn/start":
-                        thread_id = message.get("params", {}).get("threadId")
-                        if thread_id in attachable:
-                            await self.safely_attach(thread_id)
                     await upstream.send(raw)
+                    if method == "turn/start":
+                        attachments.schedule(message.get("params", {}).get("threadId"))
 
             async def from_backend():
                 async for raw in upstream:
@@ -273,10 +337,7 @@ class Relay:
                         if valid_thread_id(thread_id):
                             if questions is not None:
                                 questions.track_thread(thread)
-                            attachable.discard(thread_id)
-                            if thread.get("ephemeral") is False and not requested_ephemeral:
-                                attachable.add(thread_id)
-                                await self.safely_attach(thread_id)
+                            attachments.track(thread, requested_ephemeral)
                     if questions is None:
                         await downstream.send(raw)
                     else:
@@ -300,6 +361,7 @@ class Relay:
                 await asyncio.gather(*tasks, return_exceptions=True)
                 if questions is not None:
                     await questions.close()
+                await attachments.close()
                 await downstream.close()
 
 

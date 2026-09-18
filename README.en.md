@@ -15,6 +15,8 @@
 
 A reachable server, a log-confirmed subscription and a visible pet activity pill are separate outcomes. cpet does not install or unlock the native pet.
 
+Empty new threads attach after the first input is forwarded and their local history becomes readable. Waiting for history or desktop subscription does not block CLI messages or approvals. Existing persisted threads can attach on resume/fork.
+
 ## Requirements
 
 - macOS and zsh for automatic aliases.

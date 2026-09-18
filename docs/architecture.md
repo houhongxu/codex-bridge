@@ -18,10 +18,12 @@ flowchart LR
 ## 建立订阅
 
 1. `cx` 准备 launchd 管理的共享后台，并为自己的 CLI 启动临时 WebSocket 转接器。
-2. 转接器关联该连接的 `thread/start`、`thread/resume`、`thread/fork` 请求与响应；只有明确 `ephemeral: false` 的成功响应才进入可接入集合。
-3. 对未确认订阅的任务执行 `open -g -a <app> codex://threads/<id>`。
+2. 转接器关联该连接的 `thread/start`、`thread/resume`、`thread/fork` 请求与响应；只有明确 `ephemeral: false`、请求未指定临时任务且响应带本地绝对 `path` 的成功响应才进入可接入集合。
+3. `path` 可能仅是预定位置。已有文件必须是可读的普通 JSONL 文件，首行包含完整的 `session_meta`，才会对未确认订阅的任务执行 `open -g -a <app> codex://threads/<id>`。空的新对话暂不打开桌面，也不持续轮询。
 4. 桌面打开任务后，用自己的连接调用 `thread/resume`，加载任务并接收后续事件。这与脚本自己建一个订阅连接不同：事件需要到达桌面所持有的连接。
 5. 转接器从当前桌面进程的日志检查订阅证据；宠物是否显示仍受桌面 UI 状态影响。
+
+`turn/start` 先原样转发，再在独立异步任务中等待历史可读（每 100ms 检查，最多 10 秒）。同一连接的同一任务最多一个接入操作；等待文件或桌面确认均不占用 RPC 转发循环。超时不打开桌面，下次 CLI 提问可重试；连接关闭时取消等待。提问适配器生成的 `turn/start` 也沿用此流程。缺失路径或不兼容的历史格式会跳过自动接入，不猜测或改写后台存储。
 
 [官方 App Server 文档](https://learn.chatgpt.com/docs/app-server) 说明任务与事件接口；deep link、日志字段和桌面外部后台环境变量是本机实现观察，不构成官方稳定接口承诺。
 
