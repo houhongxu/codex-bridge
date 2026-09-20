@@ -291,6 +291,88 @@ class PersistedAttachments:
         self.tasks.clear()
 
 
+class EmptyThreadNames:
+    """Materialize owned paginated threads before publishing a name.
+
+    Metadata-only naming can make an empty thread visible to Desktop while its
+    rollout still exists only in memory. Ask the server to persist its history;
+    never synthesize a message, write its files, or resume another client's thread.
+    """
+    TIMEOUT = 3
+
+    def __init__(self, send_backend, send_cli):
+        self.send_backend = send_backend
+        self.send_cli = send_cli
+        self.paths = {}
+        self.prefix = "cpet-history-" + uuid.uuid4().hex + "-"
+        self.pending = {}
+        self.tasks = set()
+        self.lock = asyncio.Lock()
+
+    def track(self, thread, requested_ephemeral):
+        thread_id = thread.get("id")
+        self.paths.pop(thread_id, None)
+        path = thread.get("path")
+        if (valid_thread_id(thread_id) and not requested_ephemeral
+                and thread.get("ephemeral") is False
+                and thread.get("historyMode") == "paginated"
+                and isinstance(path, str) and Path(path).is_absolute()):
+            self.paths[thread_id] = Path(path)
+
+    def response(self, message):
+        request_id = message.get("id")
+        if ("method" in message or not isinstance(request_id, str)
+                or not request_id.startswith(self.prefix)):
+            return False
+        future = self.pending.get(request_id)
+        if future is not None and not future.done():
+            future.set_result(None)
+        return True  # Also consume late replies after our timeout.
+
+    def schedule(self, raw, message):
+        task = asyncio.create_task(self.forward(raw, message))
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+
+    async def forward(self, raw, message):
+        try:
+            async with self.lock:
+                thread_id = message.get("params", {}).get("threadId")
+                path = self.paths.get(thread_id)
+                if path is not None and not rollout_ready(path):
+                    request_id = self.prefix + uuid.uuid4().hex
+                    future = asyncio.get_running_loop().create_future()
+                    self.pending[request_id] = future
+                    try:
+                        await self.send_backend(json.dumps({
+                            "id": request_id, "method": "thread/read",
+                            "params": {"threadId": thread_id, "includeTurns": True}}))
+                        await asyncio.wait_for(future, self.TIMEOUT)
+                    except asyncio.TimeoutError:
+                        pass
+                    finally:
+                        self.pending.pop(request_id, None)
+                    # Persistence may succeed before history projection rejects
+                    # a not-yet-indexed thread. Verify the actual rollout.
+                    if not rollout_ready(path):
+                        await self.send_cli({"id": message["id"], "error": {
+                            "code": -32603,
+                            "message": "cpet could not persist this empty thread before naming it. "
+                                       "Send the first message in CLI, then retry naming; "
+                                       "do not open the empty thread in Desktop yet."}})
+                        return
+                await self.send_backend(raw)
+        except ConnectionClosed:
+            pass
+
+    async def close(self):
+        tasks = list(self.tasks)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self.tasks.clear()
+
+
 class Relay:
     def __init__(self, upstream, attach, question_sync=True):
         self.upstream = upstream
@@ -313,6 +395,7 @@ class Relay:
                     attachments.schedule(message.get("params", {}).get("threadId"))
 
             questions = QuestionSync(send_cli, send_backend) if self.question_sync else None
+            names = EmptyThreadNames(upstream.send, send_cli)
 
             async def from_cli():
                 async for raw in downstream:
@@ -320,6 +403,9 @@ class Relay:
                     if questions is not None and await questions.from_cli(message):
                         continue
                     method = message.get("method")
+                    if method == "thread/name/set" and "id" in message:
+                        names.schedule(raw, message)
+                        continue
                     if method in {"thread/start", "thread/resume", "thread/fork"} and "id" in message:
                         pending[message["id"]] = message.get("params", {}).get("ephemeral") is True
                     await upstream.send(raw)
@@ -329,12 +415,15 @@ class Relay:
             async def from_backend():
                 async for raw in upstream:
                     message = object_message(raw)
+                    if names.response(message):
+                        continue
                     request_id = message.get("id")
                     if request_id in pending and "method" not in message:
                         requested_ephemeral = pending.pop(request_id)
                         thread = message.get("result", {}).get("thread", {})
                         thread_id = thread.get("id")
                         if valid_thread_id(thread_id):
+                            names.track(thread, requested_ephemeral)
                             if questions is not None:
                                 questions.track_thread(thread)
                             attachments.track(thread, requested_ephemeral)
@@ -361,6 +450,7 @@ class Relay:
                 await asyncio.gather(*tasks, return_exceptions=True)
                 if questions is not None:
                     await questions.close()
+                await names.close()
                 await attachments.close()
                 await downstream.close()
 
