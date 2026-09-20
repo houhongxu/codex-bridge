@@ -9,6 +9,8 @@
 
 > Experimental: **0.1.0-alpha.3**. This is a community project, not affiliated with or endorsed by OpenAI. Desktop deep links, external-server configuration and log formats are version-dependent. Attaching a task can navigate the desktop to that task.
 
+CLI naming of an unmaterialized paginated thread first asks the backend to persist its history, so manually opening the named empty task in Desktop can recover it. No placeholder message is sent. If persistence cannot be confirmed, send the first message in CLI and retry naming.
+
 ## What it does
 
 `cx` connects the CLI and desktop to the same local Codex App Server. A per-CLI relay opens eligible tasks in the desktop when needed, allowing the desktop to subscribe and its existing pet UI to display task activity. Confirmed subscriptions are reused across turns; reconnection or unsubscription invalidates them. Ephemeral and unclassified tasks do not trigger navigation.
