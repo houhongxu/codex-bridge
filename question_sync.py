@@ -164,7 +164,7 @@ class QuestionSync:
         self.history_requests = {}
         self.calls = {}
         self.tasks = set()
-        self.prefix = "cpet-question-" + uuid.uuid4().hex + "-"
+        self.prefix = "cb-question-" + uuid.uuid4().hex + "-"
 
     def track_thread(self, thread):
         tid = thread["id"]
@@ -187,9 +187,9 @@ class QuestionSync:
         options = source.get("options")
         return {"id": request_id, "method": "item/tool/requestUserInput", "params": {
             "threadId": question["thread_id"], "turnId": question["turn_id"],
-            "itemId": question["item_id"] + ":cpet:" + str(question["index"]),
+            "itemId": question["item_id"] + ":cb:" + str(question["index"]),
             "isBlocking": True, "autoResolutionMs": None,
-            "questions": [{"id": "answer", "header": "cpet sync", "question": source["title"],
+            "questions": [{"id": "answer", "header": "cb sync", "question": source["title"],
                            "isOther": True, "isSecret": False,
                            "options": None if options is None else [
                                {"label": option, "description": ""} for option in options]}]}}
@@ -333,7 +333,7 @@ class QuestionSync:
             with contextlib.suppress(Exception):
                 await self.send_cli(self.resolved(question))
                 await self.send_cli({"method": "warning", "params": {"threadId": tid,
-                    "message": "cpet could not confirm this answer. Check the conversation in Desktop before replying again; it was not retried automatically."}})
+                    "message": "cb could not confirm this answer. Check the conversation in Desktop before replying again; it was not retried automatically."}})
 
     async def close(self):
         for task in self.tasks:

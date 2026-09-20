@@ -1,14 +1,14 @@
 # 贡献指南 / Contributing
 
-感谢你愿意帮助改进 cpet。中文和英文的 issue、PR 均可。
+感谢你愿意帮助改进 cb。中文和英文的 issue、PR 均可。
 
 ## 报告问题
 
 先阅读 [排障文档](docs/troubleshooting.md) 并搜索已有 issue。请提供：
 
-- cpet、Python、macOS、桌面应用及其内置 Codex CLI 的版本。
-- 最小复现步骤、预期结果、实际结果，是否在安装更新后重新启动了 `cx`。
-- 脱敏后的 `cpet status --json` 及相关日志片段。
+- cb、Python、macOS、桌面应用及其内置 Codex CLI 的版本。
+- 最小复现步骤、预期结果、实际结果，是否在安装更新后重新启动了 `cb`。
+- 脱敏后的 `cb status --json` 及相关日志片段。
 
 不要上传完整对话、账号凭据、环境变量全集、私有项目路径或原始诊断目录。安全问题走 [SECURITY.md](SECURITY.md)。
 

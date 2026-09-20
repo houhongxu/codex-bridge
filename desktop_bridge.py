@@ -304,7 +304,7 @@ class EmptyThreadNames:
         self.send_backend = send_backend
         self.send_cli = send_cli
         self.paths = {}
-        self.prefix = "cpet-history-" + uuid.uuid4().hex + "-"
+        self.prefix = "cb-history-" + uuid.uuid4().hex + "-"
         self.pending = {}
         self.tasks = set()
         self.lock = asyncio.Lock()
@@ -357,7 +357,7 @@ class EmptyThreadNames:
                     if not rollout_ready(path):
                         await self.send_cli({"id": message["id"], "error": {
                             "code": -32603,
-                            "message": "cpet could not persist this empty thread before naming it. "
+                            "message": "cb could not persist this empty thread before naming it. "
                                        "Send the first message in CLI, then retry naming; "
                                        "do not open the empty thread in Desktop yet."}})
                         return
@@ -462,7 +462,7 @@ async def main():
     args = parser.parse_args()
     token = secrets.token_urlsafe(24)
     relay = Relay(args.upstream, DesktopAttacher(args.app),
-                  question_sync=os.environ.get("CPET_QUESTION_SYNC", "1") != "0")
+                  question_sync=os.environ.get("CB_QUESTION_SYNC", "1") != "0")
 
     async def handle(connection):
         if not relay_authorized(connection.request, token):

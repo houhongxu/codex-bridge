@@ -4,7 +4,7 @@
 
 ## 初始仓库设置
 
-- About：一句话描述 macOS、Codex CLI 与桌面宠物的连接能力。
+- About：一句话描述 macOS、Codex CLI 与桌面端共享后台、会话和任务状态的能力。
 - Topics：`codex`、`macos`、`cli`、`desktop-pet`、`python`、`websocket`。
 - 开启 Issues 和私密漏洞报告，保留明确的 bug/feature 模板；暂不拆分多个社区。
 - 开启 GitHub Actions，确认 `CI` 在 `main` 和 PR 上运行。
@@ -13,7 +13,7 @@
 
 ## 发布流程
 
-1. 在 `cpet.py` 更新 `__version__`，更新两份 README、CHANGELOG 和兼容性记录。
+1. 在 `cb.py` 更新 `__version__`，更新两份 README、CHANGELOG 和兼容性记录。
 2. 在 `docs/releases/` 写版本说明：新增/修复、已知限制、验证范围、安装及回退。
 3. 运行贡献指南中的检查。CI 通过后，在已知 macOS 环境做必要的手工验证，未测项目明确保留。
 4. 在 `main` 的目标提交上创建版本标签，例如 `v0.1.0-alpha.1`。
@@ -27,10 +27,10 @@ git fetch --tags
 git checkout v0.1.0-alpha.1
 ./install.sh
 # 退出旧 CLI 后恢复任务
-cx resume --all
+cb resume --all
 ```
 
-安装更新会备份变更的运行脚本，但备份不包含完整依赖环境；恢复已发布版本应重新运行对应版本安装器。后台二进制由桌面应用提供，回退 cpet 不能回退桌面应用。
+安装更新会备份变更的运行脚本，但备份不包含完整依赖环境；恢复已发布版本应重新运行对应版本安装器。后台二进制由桌面应用提供，回退 cb 不能回退桌面应用。
 
 ## 前四周怎么运营
 
@@ -55,7 +55,7 @@ cx resume --all
 
 ## 可复用的首次介绍文案
 
-> 我做了一个 macOS 小工具 cpet，让 Codex CLI 的普通任务接入桌面应用现有的宠物进度显示。`cx` 自动连接共享后台，首次建立订阅后复用，减少重复跳转。源码与安装副本分离，MIT 开源。目前是实验性版本，依赖桌面版本，首次接入仍可能导航页面；欢迎愿意反馈安装和兼容性问题的用户试用。仓库：https://github.com/houhongxu/cpet
+> 我做了一个 macOS 工具 Codex Bridge，让 Codex CLI 与桌面端接入同一个本地 App Server，共享会话并展示原生宠物任务状态。`cb` 自动连接共享后台，首次建立订阅后复用，减少重复跳转。源码与安装副本分离，MIT 开源。目前是实验性版本，依赖桌面版本，首次接入仍可能导航页面；欢迎愿意反馈安装和兼容性问题的用户试用。仓库：https://github.com/houhongxu/cpet
 
 配一段真实演示再发。可先在自己的 GitHub 主页、朋友圈或常用开发者社区分享一次；向其他社区投稿前阅读其自荐规则。宣传内容由维护者自行发布，本项目不自动向他人发送消息。
 

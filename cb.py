@@ -18,7 +18,7 @@ import time
 import urllib.error
 import urllib.request
 
-__version__ = "0.1.0-alpha.3"
+__version__ = "0.2.0-alpha.1"
 
 ENDPOINT = "ws://127.0.0.1:4500"
 ENV_KEY = "CODEX_APP_SERVER_WS_URL"
@@ -59,24 +59,26 @@ def atomic_write(path, data, mode=0o600):
 
 def alias_text(original, executable):
     block = (f"{BEGIN}\n"
-             f"alias cx={shlex.quote(shlex.quote(str(executable)) + ' cx')}\n"
-             f"alias cpet={shlex.quote(shlex.quote(str(executable)))}\n"
+             f"alias cb={shlex.quote(shlex.quote(str(executable)))}\n"
              f"{END}\n")
     pattern = re.compile(r"(?m)^" + re.escape(BEGIN) + r"\n.*?^" + re.escape(END) + r"\n?", re.S)
+    outside = original
     if BEGIN in original or END in original:
         if len(pattern.findall(original)) != 1:
             raise BridgeError(".zshrc 中的 codex-cli-bridge 标记不完整，未修改文件。")
+        outside = pattern.sub("", original)
+    if re.search(r"(?m)^\s*(?:alias\s+cb=|(?:function\s+)?cb\s*\(\))", outside):
+        raise BridgeError(".zshrc 已定义 cb，未覆盖现有命令。")
+    if outside != original:
         return pattern.sub(lambda _: block, original)
-    if re.search(r"(?m)^\s*(?:alias\s+(?:cx|cpet)=|(?:function\s+)?(?:cx|cpet)\s*\(\))", original):
-        raise BridgeError(".zshrc 已定义 cx 或 cpet，未覆盖现有命令。")
     return original + ("\n" if original and not original.endswith("\n") else "") + "\n" + block
 
 
 def cli_arguments(cli, extra, endpoint=ENDPOINT, cwd=None, auth_token_env=None):
     if any(a == "--remote" or a.startswith("--remote=") for a in extra):
-        raise BridgeError("cx 已固定连接本机共享后台；连接其他地址请直接使用 codex。")
+        raise BridgeError("cb 已固定连接本机共享后台；连接其他地址请直接使用 codex。")
     if any(a == "--remote-auth-token-env" or a.startswith("--remote-auth-token-env=") for a in extra):
-        raise BridgeError("cx 自动管理本机转接凭据；连接其他后台请直接使用 codex。")
+        raise BridgeError("cb 自动管理本机转接凭据；连接其他后台请直接使用 codex。")
     remote = ["--remote", endpoint]
     if auth_token_env:
         remote += ["--remote-auth-token-env", auth_token_env]
@@ -113,10 +115,10 @@ def launch_cli(bridge, extra):
             ready = json.loads(line)
             endpoint = ready["endpoint"]
             environment = os.environ.copy()
-            environment["CPET_REMOTE_AUTH_TOKEN"] = ready["auth_token"]
+            environment["CB_REMOTE_AUTH_TOKEN"] = ready["auth_token"]
             for key in ("NO_PROXY", "no_proxy"):
                 environment[key] = ",".join(filter(None, [environment.get(key), "127.0.0.1", "localhost"]))
-            command = cli_arguments(bridge.cli, extra, endpoint, cwd, "CPET_REMOTE_AUTH_TOKEN")
+            command = cli_arguments(bridge.cli, extra, endpoint, cwd, "CB_REMOTE_AUTH_TOKEN")
             child = subprocess.Popen(command, env=environment)
             while True:
                 try:
@@ -166,7 +168,7 @@ class Bridge:
         self.home = Path(home or Path.home())
         self.root = self.home / "Library/Application Support/Codex CLI Bridge"
         self.runtime = self.root / "runtime"
-        self.bin = self.home / ".local/bin/codex-pet"
+        self.bin = self.home / ".local/bin/cb"
         self.server_plist = self.root / "server.plist"
         self.login_plist = self.home / f"Library/LaunchAgents/{LOGIN_LABEL}.plist"
         self.backup_env = self.root / "previous-launch-environment.json"
@@ -291,7 +293,7 @@ class Bridge:
         self.restore_desktop_env()
         print("共享后台已关闭，桌面应用下次启动时恢复原连接设置。")
         if self.login_plist.exists():
-            print("登录自启仍开启；要取消它，运行 cpet disable。")
+            print("登录自启仍开启；要取消它，运行 cb disable。")
 
     def enable(self):
         if not self.bin.exists():
@@ -321,7 +323,7 @@ class Bridge:
         if self.loaded(LOGIN_LABEL):
             run(["/bin/launchctl", "bootout", f"{self.domain}/{LOGIN_LABEL}"])
         self.login_plist.unlink(missing_ok=True)
-        print("登录自启已关闭；当前后台和任务继续运行。需要停止时运行 cpet off。")
+        print("登录自启已关闭；当前后台和任务继续运行。需要停止时运行 cb off。")
 
     def status(self):
         owned = self.loaded(SERVER_LABEL)
@@ -352,7 +354,7 @@ class Bridge:
     def install_runtime(self):
         """Install an independent runtime; never point commands at the checkout."""
         source = Path(__file__).resolve().parent
-        files = ["cpet.py", "desktop_bridge.py", "question_sync.py", "requirements.txt"]
+        files = ["cb.py", "desktop_bridge.py", "question_sync.py", "requirements.txt"]
         if (source / "LICENSE").exists():
             files.append("LICENSE")
         # Read everything before touching a working installation.
@@ -376,8 +378,8 @@ class Bridge:
         for name, data in payloads.items():
             target = self.runtime / name
             if not target.exists() or target.read_bytes() != data:
-                atomic_write(target, data, 0o700 if name == "cpet.py" else 0o600)
-        return self.runtime / "cpet.py"
+                atomic_write(target, data, 0o700 if name == "cb.py" else 0o600)
+        return self.runtime / "cb.py"
 
     def install(self):
         self.prepare()
@@ -386,6 +388,9 @@ class Bridge:
         target_rc = rc.resolve() if rc.is_symlink() else rc
         original = target_rc.read_text() if target_rc.exists() else ""
         updated = alias_text(original, self.bin)
+        if self.bin.exists() or self.bin.is_symlink():
+            if not self.bin.is_symlink() or self.bin.resolve() != (self.runtime / "cb.py").resolve():
+                raise BridgeError("安装路径 cb 已被其他文件占用，未覆盖。")
         source = self.install_runtime()
         if source != self.bin.resolve():
             # This stable installed copy survives checkout moves and removal.
@@ -404,9 +409,20 @@ class Bridge:
                 print(f".zshrc 已备份：{backup}")
             mode = target_rc.stat().st_mode & 0o777 if target_rc.exists() else 0o600
             atomic_write(target_rc, updated.encode(), mode)
+        # Update the next-login configuration without restarting any service.
+        legacy = self.home / ".local/bin/codex-pet"
+        if self.login_plist.exists():
+            config = plistlib.loads(self.login_plist.read_bytes())
+            arguments = config.get("ProgramArguments", [])
+            if config.get("Label") == LOGIN_LABEL and str(legacy) in arguments:
+                config["ProgramArguments"] = [str(self.bin) if value == str(legacy) else value
+                                              for value in arguments]
+                atomic_write(self.login_plist, plistlib.dumps(config))
+        if legacy.is_symlink() and legacy.resolve() == (self.runtime / "cpet.py").resolve():
+            legacy.unlink()
         print(f"已安装：{self.bin}")
         print(f"独立运行目录：{self.runtime}（移动源码仓库不会影响命令）")
-        print("新终端可使用 cx 和 cpet。当前终端请运行 source ~/.zshrc。")
+        print("新终端可使用 cb。旧终端请运行 unalias cx cpet 2>/dev/null; source ~/.zshrc。")
 
     def uninstall(self):
         self.disable()
@@ -429,11 +445,16 @@ def main():
         raise BridgeError("此脚本只用于 macOS。")
     bridge = Bridge()
     args = sys.argv[1:]
-    if args and args[0] == "cx":
+    actions = ["on", "off", "enable", "disable", "status", "install", "uninstall", "login-start"]
+    if args and args[0] == "cli":
         sys.exit(launch_cli(bridge, args[1:]))
-    parser = argparse.ArgumentParser(description="Codex CLI 与桌面应用共享后台管理")
-    parser.add_argument("--version", action="version", version=f"cpet {__version__}")
-    parser.add_argument("action", choices=["on", "off", "enable", "disable", "status", "install", "uninstall", "login-start"])
+    if not args or args[0] not in actions + ["--help", "-h", "--version", "-V"]:
+        sys.exit(launch_cli(bridge, args))
+    parser = argparse.ArgumentParser(
+        prog="cb", description="Codex Bridge：CLI 与桌面共享本地后台和会话",
+        epilog="cb 默认启动 CLI；cb resume <任务> 接续会话；cb cli ... 原样转发 CLI 参数。")
+    parser.add_argument("--version", "-V", action="version", version=f"Codex Bridge {__version__}")
+    parser.add_argument("action", choices=actions)
     parser.add_argument("--json", action="store_true", help="status 以 JSON 输出")
     parser.add_argument("--enable", action="store_true", help="install 后启用登录自启")
     options = parser.parse_args(args)
@@ -460,8 +481,8 @@ def main():
                 print("最近一次任务订阅：" + labels.get(attachment.get("status"), "未知"))
                 print("  检查时间：" + str(attachment.get("checked_at", "未知")))
             else:
-                print("最近一次任务订阅：暂无记录；新版 cx 会自动接入桌面任务。")
-            print("宠物同步：仍需用运行中的 cx 任务验证；连接成功不代表气泡已显示。")
+                print("最近一次任务订阅：暂无记录；新版 cb 会自动接入桌面任务。")
+            print("宠物同步：仍需用运行中的 cb 任务验证；连接成功不代表气泡已显示。")
             print("显示规则：运行中、等待处理、失败或有未读回复的任务；已读空闲任务不显示。")
             print("日志目录：" + info["log_directory"])
     elif options.action == "login-start":
