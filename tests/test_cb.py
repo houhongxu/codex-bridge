@@ -144,6 +144,7 @@ class CommandRoutingTests(unittest.TestCase):
         import plistlib
         with tempfile.TemporaryDirectory() as directory:
             bridge = cb.Bridge(directory)
+            bridge.app = Path('/Applications/ChatGPT.app')
             old = bridge.home / '.local/bin/codex-pet'
             old.parent.mkdir(parents=True)
             bridge.runtime.mkdir(parents=True)
@@ -176,6 +177,7 @@ class CommandRoutingTests(unittest.TestCase):
     def test_install_preserves_unrelated_executable(self):
         with tempfile.TemporaryDirectory() as directory:
             bridge = cb.Bridge(directory)
+            bridge.app = Path('/Applications/ChatGPT.app')
             bridge.bin.parent.mkdir(parents=True)
             bridge.bin.write_text('user command\n')
             with patch.object(bridge, 'install_runtime') as install:
