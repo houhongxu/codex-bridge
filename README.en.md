@@ -2,7 +2,7 @@
 
 **Share sessions between Codex CLI and Desktop.** A macOS bridge connecting both clients to one local Codex App Server, with session continuation, task subscriptions, question adaptation, and native Desktop pet status.
 
-[![CI](https://github.com/houhongxu/cpet/actions/workflows/ci.yml/badge.svg)](https://github.com/houhongxu/cpet/actions/workflows/ci.yml)
+[![CI](https://github.com/houhongxu/codex-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/houhongxu/codex-bridge/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [简体中文](README.md) · English · [Architecture](docs/architecture.md) · [Troubleshooting](docs/troubleshooting.md)
@@ -17,7 +17,7 @@ The project is now **Codex Bridge**, with `cb` as its only entry point. `cx`, `c
 
 Use `cb` to launch CLI, `cb resume <name-or-id>` to resume, and `cb status` for bridge status. `cb --help` / `cb --version` describe Bridge; `cb cli --help` / `cb cli --version` describe the official CLI. Management commands `on/off/enable/disable/status/install/uninstall/login-start` are reserved; use `cb cli ...` to forward conflicting arguments to CLI.
 
-Configuration variables are now `CB_PYTHON` and `CB_QUESTION_SYNC`; old `CPET_*` names are no longer read. Existing server addresses, session storage, launchd labels, and runtime directories remain in place. Running tasks are not restarted; relaunch after finishing current work to load the update. The GitHub repository URL remains `houhongxu/cpet`.
+Configuration variables are now `CB_PYTHON` and `CB_QUESTION_SYNC`; old `CPET_*` names are no longer read. Existing server addresses, session storage, launchd labels, and runtime directories remain in place. Running tasks are not restarted; relaunch after finishing current work to load the update. The GitHub repository is `houhongxu/codex-bridge`.
 
 ## What it does
 
@@ -42,8 +42,8 @@ See the [tested compatibility scope](docs/compatibility.md). Windows, Linux desk
 
 ```sh
 mkdir -p ~/workspace
-git clone https://github.com/houhongxu/cpet.git ~/workspace/cb
-cd ~/workspace/cb
+git clone https://github.com/houhongxu/codex-bridge.git ~/workspace/codex-bridge
+cd ~/workspace/codex-bridge
 ./install.sh
 source ~/.zshrc
 cb --version

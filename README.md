@@ -2,7 +2,7 @@
 
 **让 Codex CLI 与桌面端共享会话。** macOS 上的本地共享后台与会话桥接工具，支持会话接续、任务订阅、异步问答适配和桌面宠物状态展示。
 
-[![CI](https://github.com/houhongxu/cpet/actions/workflows/ci.yml/badge.svg)](https://github.com/houhongxu/cpet/actions/workflows/ci.yml)
+[![CI](https://github.com/houhongxu/codex-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/houhongxu/codex-bridge/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status: experimental](https://img.shields.io/badge/status-experimental-orange.svg)](docs/compatibility.md)
 
@@ -24,7 +24,7 @@ cb --version           # Bridge 版本
 cb cli --version       # 官方 CLI 版本
 ```
 
-`on/off/enable/disable/status/install/uninstall/login-start` 是管理子命令；需要把同名参数交给官方 CLI 时使用 `cb cli ...`。配置变量同步改为 `CB_PYTHON`、`CB_QUESTION_SYNC`（旧 `CPET_*` 不再读取）。后台地址、会话目录、launchd 标签和运行目录保持原位，不重启正在运行的任务。旧进程需结束当前工作后重新启动才加载更新。GitHub 仓库 URL 暂仍为 `houhongxu/cpet`。
+`on/off/enable/disable/status/install/uninstall/login-start` 是管理子命令；需要把同名参数交给官方 CLI 时使用 `cb cli ...`。配置变量同步改为 `CB_PYTHON`、`CB_QUESTION_SYNC`（旧 `CPET_*` 不再读取）。后台地址、会话目录、launchd 标签和运行目录保持原位，不重启正在运行的任务。旧进程需结束当前工作后重新启动才加载更新。GitHub 仓库为 `houhongxu/codex-bridge`。
 
 ## 为什么需要它
 
@@ -58,8 +58,8 @@ cb cli --version       # 官方 CLI 版本
 
 ```sh
 mkdir -p ~/workspace
-git clone https://github.com/houhongxu/cpet.git ~/workspace/cb
-cd ~/workspace/cb
+git clone https://github.com/houhongxu/codex-bridge.git ~/workspace/codex-bridge
+cd ~/workspace/codex-bridge
 ./install.sh
 source ~/.zshrc
 cb --version

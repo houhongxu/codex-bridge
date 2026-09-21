@@ -55,7 +55,7 @@
 
 首次订阅可能导航桌面；日志确认不等同于宠物可见；共享后台的文件权限、代理及桌面工具上下文可能与内置后台不同。详见兼容性文档。
 
-[Unreleased]: https://github.com/houhongxu/cpet/compare/v0.1.0-alpha.3...HEAD
-[0.1.0-alpha.3]: https://github.com/houhongxu/cpet/releases/tag/v0.1.0-alpha.3
-[0.1.0-alpha.2]: https://github.com/houhongxu/cpet/releases/tag/v0.1.0-alpha.2
-[0.1.0-alpha.1]: https://github.com/houhongxu/cpet/releases/tag/v0.1.0-alpha.1
+[Unreleased]: https://github.com/houhongxu/codex-bridge/compare/v0.1.0-alpha.3...HEAD
+[0.1.0-alpha.3]: https://github.com/houhongxu/codex-bridge/releases/tag/v0.1.0-alpha.3
+[0.1.0-alpha.2]: https://github.com/houhongxu/codex-bridge/releases/tag/v0.1.0-alpha.2
+[0.1.0-alpha.1]: https://github.com/houhongxu/codex-bridge/releases/tag/v0.1.0-alpha.1

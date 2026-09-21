@@ -6,7 +6,7 @@
 
 ## 报告漏洞
 
-优先使用 [GitHub 私密漏洞报告](https://github.com/houhongxu/cpet/security/advisories/new)。如果该入口尚未启用或不可用，请先创建一个不包含利用细节、凭据或私人数据的 issue，请维护者提供私密联系方式；不要公开完整复现材料。维护者会在有能力处理时回复，不承诺服务级别或漏洞奖励。
+优先使用 [GitHub 私密漏洞报告](https://github.com/houhongxu/codex-bridge/security/advisories/new)。如果该入口尚未启用或不可用，请先创建一个不包含利用细节、凭据或私人数据的 issue，请维护者提供私密联系方式；不要公开完整复现材料。维护者会在有能力处理时回复，不承诺服务级别或漏洞奖励。
 
 普通安装失败或宠物未显示请使用 bug 模板。
 
