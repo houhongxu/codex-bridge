@@ -1,6 +1,6 @@
 """Opt-in real App Server regression; no model calls or real Desktop actions.
 
-CPET_TEST_CODEX=/path/to/codex python -m unittest discover -s tests -p test_empty_thread_integration.py -v
+CB_TEST_CODEX=/path/to/codex python -m unittest discover -s tests -p test_empty_thread_integration.py -v
 """
 import asyncio
 import contextlib
@@ -18,13 +18,13 @@ from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
 
-@unittest.skipUnless(os.environ.get('CPET_TEST_CODEX'), 'set CPET_TEST_CODEX for isolated real-server test')
+@unittest.skipUnless(os.environ.get('CB_TEST_CODEX'), 'set CB_TEST_CODEX for isolated real-server test')
 class EmptyThreadIntegrationTests(unittest.IsolatedAsyncioTestCase):
     @contextlib.asynccontextmanager
     async def client(self, home, attach):
         with tempfile.TemporaryFile() as stderr:
             process = await asyncio.create_subprocess_exec(
-                os.environ['CPET_TEST_CODEX'], 'app-server',
+                os.environ['CB_TEST_CODEX'], 'app-server',
                 env={**os.environ, 'CODEX_HOME': str(home)},
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=stderr)
             async def backend(ws):
@@ -57,7 +57,7 @@ class EmptyThreadIntegrationTests(unittest.IsolatedAsyncioTestCase):
                                     if message.get('id') == request_id:
                                         self.assertNotIn('error', message, message)
                                         return message['result']
-                            await rpc('initialize', {'clientInfo': {'name': 'cpet-isolated-test', 'version': '0'},
+                            await rpc('initialize', {'clientInfo': {'name': 'cb-isolated-test', 'version': '0'},
                                                      'capabilities': {'experimentalApi': True}})
                             yield rpc
             finally:
@@ -69,7 +69,7 @@ class EmptyThreadIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     await process.wait()
 
     async def test_named_empty_thread_supports_history_and_cold_resume(self):
-        with tempfile.TemporaryDirectory(prefix='cpet-empty-test-') as directory:
+        with tempfile.TemporaryDirectory(prefix='cb-empty-test-') as directory:
             home = Path(directory)
             (home / 'config.toml').write_text(
                 'model="test"\nmodel_provider="test"\n'

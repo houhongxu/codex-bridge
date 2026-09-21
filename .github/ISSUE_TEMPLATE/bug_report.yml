@@ -10,14 +10,14 @@ body:
     id: versions
     attributes:
       label: 版本 / Versions
-      description: macOS、Python、cpet、桌面应用、内置 Codex CLI 版本。
+      description: macOS、Python、cb、桌面应用、内置 Codex CLI 版本。
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
       label: 复现步骤 / Steps
-      description: 包含安装方式，以及更新后是否重新启动 cx。
+      description: 包含安装方式，以及更新后是否重新启动 cb。
     validations:
       required: true
   - type: textarea
@@ -30,5 +30,5 @@ body:
     id: diagnostics
     attributes:
       label: 脱敏诊断 / Redacted diagnostics
-      description: 可选提供 cpet status --json 和最小日志片段，移除真实任务 ID、私人路径和凭据。
+      description: 可选提供 cb status --json 和最小日志片段，移除真实任务 ID、私人路径和凭据。
       render: text

@@ -140,6 +140,49 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("error", error)
                 self.assertEqual(len(attached), 2)
 
+    async def test_concurrent_cli_cwds_and_new_threads_pass_through_without_rewriting(self):
+        received = []
+
+        async def backend(ws):
+            async for raw in ws:
+                message = json.loads(raw)
+                params = message.get("params", {})
+                received.append(dict(params))
+                cwd = params.get("cwd")
+                thread_id = THREAD_A if cwd == "/project A" else THREAD_B
+                thread = self.thread(thread_id)
+                thread["cwd"] = cwd if cwd is not None else "/backend service"
+                await ws.send(json.dumps({"id": message["id"], "result": {"thread": thread}}))
+
+        async def attach(_thread_id):
+            pass
+
+        async with serve(backend, "127.0.0.1", 0) as server:
+            relay = Relay(f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}", attach)
+            async with serve(relay.handle, "127.0.0.1", 0) as front:
+                endpoint = f"ws://127.0.0.1:{front.sockets[0].getsockname()[1]}"
+
+                async def start_twice(cwd):
+                    results = []
+                    async with connect(endpoint, proxy=None) as client:
+                        for request_id in (1, 2):
+                            await client.send(json.dumps({
+                                "id": request_id, "method": "thread/start", "params": {"cwd": cwd}}))
+                            results.append(json.loads(await client.recv())["result"]["thread"]["cwd"])
+                    return results
+
+                a, b = await asyncio.gather(start_twice("/project A"), start_twice("/project B"))
+                self.assertEqual(a, ["/project A", "/project A"])
+                self.assertEqual(b, ["/project B", "/project B"])
+                self.assertCountEqual([params.get("cwd") for params in received],
+                                      ["/project A", "/project A", "/project B", "/project B"])
+
+                async with connect(endpoint, proxy=None) as client:
+                    await client.send(json.dumps({"id": 3, "method": "thread/start", "params": {}}))
+                    response = json.loads(await client.recv())
+                    self.assertEqual(response["result"]["thread"]["cwd"], "/backend service")
+                self.assertNotIn("cwd", received[-1])
+
     async def test_ephemeral_and_unknown_threads_never_trigger_desktop_links(self):
         attached = []
         received = []

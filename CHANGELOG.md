@@ -2,7 +2,13 @@
 
 用户可见的改动记录在此。版本遵循语义化版本形式；`0.x` 预发布阶段仍可能调整接口。项目首次公开发布之前的本机调试不作为独立发布版本。
 
-## [Unreleased]
+## [Unreleased] — 0.2.0-alpha.1
+
+### Breaking changes
+
+- 项目更名为 Codex Bridge，唯一命令入口改为 `cb`；移除 `cx`、`cpet`、`codex-pet`，不提供兼容别名。安装时迁移管理的别名块和旧链接。
+- `cb` 默认启动 CLI；管理子命令统一使用 `cb status` 等；`cb cli ...` 显式转发官方 CLI 参数。Bridge 与官方 CLI 的帮助和版本查询分离。
+- 源码入口改为 `cb.py`；配置变量使用 `CB_PYTHON`、`CB_QUESTION_SYNC`，不再读取旧 `CPET_*`。共享后台与会话存储不迁移，不重启现有进程。
 
 ### Fixed
 

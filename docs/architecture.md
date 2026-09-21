@@ -6,18 +6,18 @@ CLI 与桌面共用本地 App Server；转接器让桌面打开并订阅 CLI 的
 
 ```mermaid
 flowchart LR
-    CLI[CLI cx] <-->|RPC 与提问适配| Relay[每个 CLI 的转接器]
+    CLI[CLI cb] <-->|RPC 与提问适配| Relay[每个 CLI 的转接器]
     Relay <--> Server[本机 App Server :4500]
     Desktop[桌面应用] <-->|自己的后台连接| Server
     Relay -.->|需要时打开 codex://threads/ID| Desktop
     Desktop --> Pet[原生宠物]
 ```
 
-后台是本机运行的 Codex 服务进程，负责管理任务和工具执行并调用模型服务；cpet 不在本机部署模型。
+后台是本机运行的 Codex 服务进程，负责管理任务和工具执行并调用模型服务；cb 不在本机部署模型。
 
 ## 建立订阅
 
-1. `cx` 准备 launchd 管理的共享后台，并为自己的 CLI 启动临时 WebSocket 转接器。
+1. `cb` 准备 launchd 管理的共享后台，并为自己的 CLI 启动临时 WebSocket 转接器。
 2. 转接器关联该连接的 `thread/start`、`thread/resume`、`thread/fork` 请求与响应；只有明确 `ephemeral: false`、请求未指定临时任务且响应带本地绝对 `path` 的成功响应才进入可接入集合。
 3. `path` 可能仅是预定位置。已有文件必须是可读的普通 JSONL 文件，首行包含完整的 `session_meta`，才会对未确认订阅的任务执行 `open -g -a <app> codex://threads/<id>`。空的新对话暂不打开桌面，也不持续轮询。
 4. 桌面打开任务后，用自己的连接调用 `thread/resume`，加载任务并接收后续事件。这与脚本自己建一个订阅连接不同：事件需要到达桌面所持有的连接。
@@ -43,7 +43,7 @@ flowchart LR
 4. CLI 回答这些合成请求时，转接器消费响应，生成同格式的用户回答。正在运行的任务使用 `turn/steer`（含 `expectedTurnId`），空闲任务使用 `turn/start`；不覆盖权限、模型或沙箱设置。
 5. 已完成请求的迟到响应被忽略。提交被拒绝或超时会提示用户去桌面检查，不自动重发，避免超时后重复作答。两个客户端同时提交仍可能竞争，后台没有为本适配器提供跨客户端原子锁。
 
-普通 RPC 与真实审批继续原样转发，合成请求使用独立命名空间。历史分页不是完整的待答清单，因此仅保留历史问题正文，不重建交互框；未回答的历史问题仍可在桌面处理。未知问题结构退回原生行为。`CPET_QUESTION_SYNC=0` 可关闭整个适配器。
+普通 RPC 与真实审批继续原样转发，合成请求使用独立命名空间。历史分页不是完整的待答清单，因此仅保留历史问题正文，不重建交互框；未回答的历史问题仍可在桌面处理。未知问题结构退回原生行为。`CB_QUESTION_SYNC=0` 可关闭整个适配器。
 
 提问框使用官方 CLI 已有的标准请求界面；这不是给 CLI 新增界面代码，也不会把后台的异步工具改成同步工具。其界面会占用输入区域，`Esc` 仍按 CLI 标准提问框的行为中断。异步事件字段及桌面回答信封来自特定版本观察，升级后需重新验证。
 
@@ -51,14 +51,14 @@ flowchart LR
 
 `0.1.0-alpha.3` 在完成问题编号匹配之后，将发往 CLI 的 `userMessage` 副本转换为“问题 / 你的回答”。实时 `item/started`、`item/completed` 与任务恢复、读取和历史分页使用同一排版函数。后台记录、桌面连接和 CLI 向后台提交的原始信封不变。
 
-只处理单一文本项中的完整标准信封，保留问题及答案原文、换行和消息 ID；原文本偏移在重排后清空。混合附件、引用示例、不完整数据或含未知字段的信封不做部分转换；工具载荷不递归重写。排版与问答适配共同受 `CPET_QUESTION_SYNC` 控制。
+只处理单一文本项中的完整标准信封，保留问题及答案原文、换行和消息 ID；原文本偏移在重排后清空。混合附件、引用示例、不完整数据或含未知字段的信封不做部分转换；工具载荷不递归重写。排版与问答适配共同受 `CB_QUESTION_SYNC` 控制。
 
 ## 安装模型
 
 ```text
-任意源码目录 cpet/ -- ./install.sh --> 固定运行目录 runtime/
-                                      ├── cpet.py
-~/.local/bin/codex-pet ---------------->├── desktop_bridge.py
+任意源码目录 cb/ -- ./install.sh --> 固定运行目录 runtime/
+~/.local/bin/cb ---------------------> ├── cb.py
+                                      ├── desktop_bridge.py
                                       ├── question_sync.py
                                       ├── requirements.txt
                                       └── .venv/
@@ -70,10 +70,10 @@ flowchart LR
 
 | 文件 | 职责 |
 | --- | --- |
-| `cpet.py` | 用户级安装、launchd 管理、桌面连接配置、CLI 生命周期和诊断 |
+| `cb.py` | 用户级安装、launchd 管理、桌面连接配置、CLI 生命周期和诊断 |
 | `desktop_bridge.py` | 转发 RPC、识别任务归属、触发桌面接入并调用提问适配器 |
 | `question_sync.py` | 将实时异步提问转换为可关闭的 CLI 提问框，匹配桌面回答并提交 CLI 回答 |
 | `install.sh` | 平台/Python 预检查并调用安装入口 |
 | `tests/` | 隔离的安装、状态与协议回归测试 |
 
-转接进程随所属 CLI 退出；共享后台由 launchd 管理。结束 CLI 不等于停止共享后台。任务记录仍由 Codex 自身管理，cpet 不改写对话存储。
+转接进程随所属 CLI 退出；共享后台由 launchd 管理。结束 CLI 不等于停止共享后台。任务记录仍由 Codex 自身管理，cb 不改写对话存储。
