@@ -74,15 +74,66 @@ def alias_text(original, executable):
     return original + ("\n" if original and not original.endswith("\n") else "") + "\n" + block
 
 
+def caller_location(value, cwd, option):
+    if not value:
+        raise BridgeError(f"{option} 的目录不能为空。")
+    if os.path.isabs(value):
+        return value
+    if cwd is None:
+        raise BridgeError("无法确定调用目录，不能解析相对目录参数。")
+    # Keep symlink spelling while removing `.` and `..`, like an ordinary CLI
+    # resolving a relative option before it connects to a remote server.
+    return os.path.abspath(os.path.join(cwd, value))
+
+
+def normalize_cli_location(extra, cwd):
+    """Resolve CLI directory options against the shell that invoked cb."""
+    result = list(extra)
+    found = False
+    index = 0
+    while index < len(result):
+        argument = result[index]
+        if argument == "--":
+            break
+        if argument in ("--cd", "-C"):
+            if index + 1 == len(result):
+                raise BridgeError(f"{argument} 缺少目录参数。")
+            result[index + 1] = caller_location(result[index + 1], cwd, argument)
+            found = True
+            index += 2
+            continue
+        if argument.startswith("--cd="):
+            result[index] = "--cd=" + caller_location(argument.removeprefix("--cd="), cwd, "--cd")
+            found = True
+        elif argument.startswith("-C") and argument != "-C":
+            result[index] = "-C" + caller_location(argument[2:], cwd, "-C")
+            found = True
+        index += 1
+    return result, found
+
+
+def cli_options(extra):
+    """Yield option tokens before `--`, without treating a cwd value as an option."""
+    index = 0
+    while index < len(extra):
+        argument = extra[index]
+        if argument == "--":
+            return
+        yield argument
+        index += 2 if argument in ("--cd", "-C") and index + 1 < len(extra) else 1
+
+
 def cli_arguments(cli, extra, endpoint=ENDPOINT, cwd=None, auth_token_env=None):
-    if any(a == "--remote" or a.startswith("--remote=") for a in extra):
+    options = list(cli_options(extra))
+    if any(a == "--remote" or a.startswith("--remote=") for a in options):
         raise BridgeError("cb 已固定连接本机共享后台；连接其他地址请直接使用 codex。")
-    if any(a == "--remote-auth-token-env" or a.startswith("--remote-auth-token-env=") for a in extra):
+    if any(a == "--remote-auth-token-env" or a.startswith("--remote-auth-token-env=") for a in options):
         raise BridgeError("cb 自动管理本机转接凭据；连接其他后台请直接使用 codex。")
+    extra, explicit_location = normalize_cli_location(extra, cwd)
     remote = ["--remote", endpoint]
     if auth_token_env:
         remote += ["--remote-auth-token-env", auth_token_env]
-    location = [] if cwd is None or any(a == "--cd" or a.startswith("--cd=") or a.startswith("-C") for a in extra) else ["--cd", cwd]
+    location = [] if cwd is None or explicit_location else ["--cd", cwd]
     if extra and extra[0] in ("resume", "fork"):
         # Resumed and forked tasks retain their existing workspace unless the
         # user explicitly supplies -C/--cd, just like the ordinary CLI.
@@ -119,7 +170,7 @@ def launch_cli(bridge, extra):
             for key in ("NO_PROXY", "no_proxy"):
                 environment[key] = ",".join(filter(None, [environment.get(key), "127.0.0.1", "localhost"]))
             command = cli_arguments(bridge.cli, extra, endpoint, cwd, "CB_REMOTE_AUTH_TOKEN")
-            child = subprocess.Popen(command, env=environment)
+            child = subprocess.Popen(command, env=environment, cwd=cwd)
             while True:
                 try:
                     return child.wait()

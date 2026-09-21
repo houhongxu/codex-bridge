@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 spec = importlib.util.spec_from_file_location("cb", Path(__file__).resolve().parents[1] / "cb.py")
@@ -29,6 +29,87 @@ class PetDiagnosticsTests(unittest.TestCase):
             command = cb.cli_arguments("codex", args, cwd="/implicit")
             self.assertNotIn("/implicit", command)
             self.assertEqual(command[-len(args):], args)
+
+    def test_relative_cd_is_resolved_once_against_invoking_directory(self):
+        caller = "/work/project A"
+        expected = "/work/项目 B/subdir"
+        cases = [
+            (["--cd", "../项目 B/subdir"], ["--cd", expected]),
+            (["--cd=../项目 B/subdir"], ["--cd=" + expected]),
+            (["-C", "../项目 B/subdir"], ["-C", expected]),
+            (["-C../项目 B/subdir"], ["-C" + expected]),
+        ]
+        for extra, normalized in cases:
+            with self.subTest(extra=extra):
+                command = cb.cli_arguments("codex", extra, "ws://relay", caller)
+                self.assertEqual(command, ["codex", "--remote", "ws://relay", *normalized])
+
+    def test_prompt_literals_after_separator_do_not_disable_caller_cwd(self):
+        for literal in ["--cd", "--cd=prompt", "-Cprompt", "--remote", "--remote=prompt"]:
+            with self.subTest(literal=literal):
+                command = cb.cli_arguments("codex", ["--", literal], "ws://relay", "/project A")
+                self.assertEqual(command, ["codex", "--remote", "ws://relay", "--cd", "/project A",
+                                           "--", literal])
+        command = cb.cli_arguments("codex", ["--cd", "--remote"], "ws://relay", "/project A")
+        self.assertEqual(command, ["codex", "--remote", "ws://relay", "--cd", "/project A/--remote"])
+
+    def test_missing_or_empty_cd_is_rejected_before_starting_services(self):
+        for extra in [["--cd"], ["-C"], ["--cd="], ["--cd", ""]]:
+            with self.subTest(extra=extra), self.assertRaises(cb.BridgeError):
+                cb.cli_arguments("codex", extra, cwd="/project A")
+
+    def test_resume_and_fork_keep_saved_workspace_unless_explicitly_overridden(self):
+        self.assertEqual(cb.cli_arguments("codex", ["resume", "thread-c"], "ws://relay", "/project A"),
+                         ["codex", "resume", "--remote", "ws://relay", "thread-c"])
+        self.assertEqual(cb.cli_arguments("codex", ["fork", "thread-c"], "ws://relay", "/project A"),
+                         ["codex", "fork", "--remote", "ws://relay", "thread-c"])
+        self.assertEqual(cb.cli_arguments("codex", ["resume", "-C", "../project B", "thread-c"],
+                                          "ws://relay", "/project A"),
+                         ["codex", "resume", "--remote", "ws://relay", "-C", "/project B", "thread-c"])
+
+    def test_symlink_and_missing_paths_are_not_canonicalized_or_replaced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            caller = root / "项目 A"
+            target = root / "项目 B"
+            caller.mkdir()
+            target.mkdir()
+            link = root / "linked project"
+            link.symlink_to(target, target_is_directory=True)
+            command = cb.cli_arguments("codex", ["--cd", "../linked project"], cwd=str(caller))
+            self.assertEqual(command[-1], str(link))
+            missing = cb.cli_arguments("codex", ["--cd", "../missing"], cwd=str(caller))
+            self.assertEqual(missing[-1], str(root / "missing"))
+
+    def test_getcwd_failure_never_falls_back_to_home_or_runtime(self):
+        bridge = Mock()
+        with patch.object(cb.os, "getcwd", side_effect=PermissionError("denied")):
+            with self.assertRaises(PermissionError):
+                cb.launch_cli(bridge, [])
+        bridge.on.assert_not_called()
+
+    def test_cli_subprocess_uses_the_captured_invocation_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "runtime"
+            caller = root / "project A"
+            (project / ".venv/bin").mkdir(parents=True)
+            (project / ".venv/bin/python").touch()
+            caller.mkdir()
+            bridge = Mock(cli="codex", root=root, app=Path("/Applications/Codex.app"))
+            relay = Mock()
+            relay.stdout.readline.return_value = json.dumps({
+                "endpoint": "ws://127.0.0.1:49123", "auth_token": "test-token"}) + "\n"
+            child = Mock()
+            child.wait.return_value = 0
+            with patch.object(cb, "__file__", str(project / "cb.py")), \
+                    patch.object(cb.os, "getcwd", return_value=str(caller)), \
+                    patch.object(cb.select, "select", return_value=([relay.stdout], [], [])), \
+                    patch.object(cb.subprocess, "Popen", side_effect=[relay, child]) as popen:
+                self.assertEqual(cb.launch_cli(bridge, []), 0)
+            command = popen.call_args_list[1]
+            self.assertEqual(command.kwargs["cwd"], str(caller))
+            self.assertIn(str(caller), command.args[0])
 
     def test_hidden_activity_and_muted_tasks_are_reported_without_writes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -94,8 +175,14 @@ class PetDiagnosticsTests(unittest.TestCase):
             self.assertTrue((bridge.runtime / "question_sync.py").is_file())
             # Import the actual installed file in a fresh process, after removing
             # its source checkout; this also works in the Linux unit-test job.
-            code = "import runpy, sys; assert runpy.run_path(sys.argv[1])['__version__']"
-            subprocess.run([sys.executable, "-c", code, str(bridge.bin)], check=True)
+            code = ("import json, runpy, sys; m=runpy.run_path(sys.argv[1]); "
+                    "print(json.dumps(m['cli_arguments']('codex', [], 'ws://relay', sys.argv[2])))")
+            project = root / "installed entry project"
+            project.mkdir()
+            result = subprocess.run([sys.executable, "-c", code, str(bridge.bin), str(project)],
+                                    check=True, text=True, capture_output=True)
+            self.assertEqual(json.loads(result.stdout),
+                             ["codex", "--remote", "ws://relay", "--cd", str(project)])
 
     def test_failed_dependency_install_preserves_working_runtime(self):
         with tempfile.TemporaryDirectory() as directory:
