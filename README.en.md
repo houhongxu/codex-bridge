@@ -31,7 +31,7 @@ Empty new threads attach after the first input is forwarded and their local hist
 
 - macOS and zsh for automatic aliases.
 - Python 3.9+ with `venv`; a supported Python 3.11+ is recommended.
-- `/Applications/ChatGPT.app` or `/Applications/Codex.app` with a bundled `Contents/Resources/codex` supporting `app-server --listen`, `--remote` and `--remote-auth-token-env`.
+- `/Applications/ChatGPT.app` or `/Applications/Codex.app` with a bundled `Contents/Resources/codex-cli/bin/codex` (or legacy `Contents/Resources/codex`) supporting `app-server --listen`, `--remote` and `--remote-auth-token-env`.
 - An authenticated desktop app, plus a free `127.0.0.1:4500`.
 - The native pet feature is optional and needed only for pet status display.
 - Network access to install the pinned `websockets==15.0.1` dependency from PyPI.

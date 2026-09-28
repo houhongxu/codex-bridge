@@ -2,6 +2,12 @@
 
 先运行 `cb --version` 和 `cb status`。提交 issue 前去掉任务 ID、私人目录、凭据与对话内容。
 
+## 桌面升级后提示找不到 Codex
+
+新版桌面应用可能将内置 CLI 从 `Contents/Resources/codex` 移到 `Contents/Resources/codex-cli/bin/codex`。旧版 `cb` 只检测前者，因此即使应用仍在 `/Applications/ChatGPT.app` 或 `/Applications/Codex.app`，`cb on` 也可能提示找不到 Codex。
+
+更新到包含路径兼容修复的源码，在仓库运行 `./install.sh` 重新部署。安装后的 `cb` 使用独立运行副本，仅更新源码不会生效。新版会优先使用新路径并兼容旧路径；安装不会重启当前后台或桌面，正在运行的旧 `cb` 需在当前工作结束后退出再启动。
+
 ## 任务列表有任务，宠物却不显示
 
 1. 使用安装更新后重新启动的 `cb`；运行中的旧转接器不会热更新。

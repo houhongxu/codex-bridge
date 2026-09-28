@@ -14,6 +14,73 @@ cb = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cb)
 
 
+def make_bundle(root, relative="Contents/Resources/codex-cli/bin/codex", name="ChatGPT.app"):
+    app = Path(root) / name
+    executable = app / relative
+    executable.parent.mkdir(parents=True, exist_ok=True)
+    executable.touch()
+    return app, executable
+
+
+class BundleDiscoveryTests(unittest.TestCase):
+    def test_new_and_legacy_layouts_support_detection_install_and_launch_paths(self):
+        for relative in ["Contents/Resources/codex-cli/bin/codex", "Contents/Resources/codex"]:
+            for name in ["ChatGPT.app", "Codex.app"]:
+                with self.subTest(relative=relative, name=name), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    app, executable = make_bundle(root, relative, name)
+                    with patch.object(cb, "APPLICATION_PATHS", (root / "ChatGPT.app", root / "Codex.app")), \
+                            patch.object(cb, "run") as run, patch("builtins.print"):
+                        bridge = cb.Bridge(root / "home")
+                        self.assertEqual(bridge.app, app)
+                        self.assertEqual(bridge.cli, str(executable))
+                        self.assertEqual(bridge.server_config()["ProgramArguments"][0], str(executable))
+                        self.assertEqual(cb.cli_arguments(bridge.cli, ["--version"])[0], str(executable))
+                        bridge.install()
+                    self.assertTrue(bridge.bin.is_symlink())
+                    self.assertFalse(any("launchctl" in str(call) or "/usr/bin/open" in str(call)
+                                         for call in run.call_args_list))
+
+    def test_current_layout_takes_precedence_and_falls_back_after_removal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app, current = make_bundle(directory)
+            _, legacy = make_bundle(directory, "Contents/Resources/codex")
+            bridge = cb.Bridge(Path(directory) / "home")
+            bridge.app = app
+            self.assertEqual(bridge.cli, str(current))
+            current.unlink()
+            self.assertEqual(bridge.cli, str(legacy))
+
+    def test_missing_binary_is_rejected_before_install_or_service_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            apps = (root / "ChatGPT.app", root / "Codex.app")
+            (apps[0] / "Contents/Resources/codex-cli/bin/codex").mkdir(parents=True)
+            with patch.object(cb, "APPLICATION_PATHS", apps), patch.object(cb, "run") as run:
+                bridge = cb.Bridge(root / "home")
+                self.assertIsNone(bridge.app)
+                for operation in [lambda: bridge.cli, bridge.install, bridge.start_server]:
+                    with self.assertRaises(cb.BridgeError):
+                        operation()
+                run.assert_not_called()
+                self.assertFalse(bridge.root.exists())
+
+    def test_healthy_loaded_server_keeps_existing_plist_and_process(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app, _ = make_bundle(root)
+            bridge = cb.Bridge(root / "home")
+            bridge.app = app
+            bridge.root.mkdir(parents=True)
+            original = b"existing legacy server configuration\n"
+            bridge.server_plist.write_bytes(original)
+            with patch.object(bridge, "loaded", return_value=True), \
+                    patch.object(bridge, "healthy", return_value=True), patch.object(cb, "run") as run:
+                bridge.start_server()
+                run.assert_not_called()
+            self.assertEqual(bridge.server_plist.read_bytes(), original)
+
+
 class PetDiagnosticsTests(unittest.TestCase):
     def test_resume_uses_cli_supported_bearer_auth_without_url_path(self):
         command = cb.cli_arguments("codex", ["resume", "--all"], "ws://127.0.0.1:4501", auth_token_env="CB_REMOTE_AUTH_TOKEN")
@@ -144,7 +211,7 @@ class PetDiagnosticsTests(unittest.TestCase):
     def test_install_keeps_aliases_and_uses_independent_runtime(self):
         with tempfile.TemporaryDirectory() as directory:
             bridge = cb.Bridge(directory)
-            bridge.app = Path("/Applications/ChatGPT.app")
+            bridge.app, _ = make_bundle(directory)
             original = "# user configuration\nexport EXAMPLE=1\n"
             (Path(directory) / ".zshrc").write_text(original)
             with patch("builtins.print"), patch.object(cb, "run"):
@@ -167,7 +234,7 @@ class PetDiagnosticsTests(unittest.TestCase):
             for name in ["cb.py", "desktop_bridge.py", "question_sync.py", "requirements.txt"]:
                 shutil.copy2(Path(cb.__file__).parent / name, source / name)
             bridge = cb.Bridge(root / "home")
-            bridge.app = Path("/Applications/ChatGPT.app")
+            bridge.app, _ = make_bundle(root)
             with patch.object(cb, "__file__", str(source / "cb.py")), patch.object(cb, "run"), patch("builtins.print"):
                 bridge.install()
             shutil.rmtree(source)
@@ -231,7 +298,7 @@ class CommandRoutingTests(unittest.TestCase):
         import plistlib
         with tempfile.TemporaryDirectory() as directory:
             bridge = cb.Bridge(directory)
-            bridge.app = Path('/Applications/ChatGPT.app')
+            bridge.app, _ = make_bundle(directory)
             old = bridge.home / '.local/bin/codex-pet'
             old.parent.mkdir(parents=True)
             bridge.runtime.mkdir(parents=True)
@@ -264,7 +331,7 @@ class CommandRoutingTests(unittest.TestCase):
     def test_install_preserves_unrelated_executable(self):
         with tempfile.TemporaryDirectory() as directory:
             bridge = cb.Bridge(directory)
-            bridge.app = Path('/Applications/ChatGPT.app')
+            bridge.app, _ = make_bundle(directory)
             bridge.bin.parent.mkdir(parents=True)
             bridge.bin.write_text('user command\n')
             with patch.object(bridge, 'install_runtime') as install:

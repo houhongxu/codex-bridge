@@ -28,10 +28,21 @@ BEGIN = "# >>> codex-cli-bridge >>>"
 END = "# <<< codex-cli-bridge <<<"
 PET_ACTIVITY_KEY = "avatar-overlay-activity-pills-visible"
 PET_MUTED_KEY = "avatar-overlay-muted-notification-ids-v1"
+APPLICATION_PATHS = (Path("/Applications/ChatGPT.app"), Path("/Applications/Codex.app"))
+BUNDLED_CLI_PATHS = ("Contents/Resources/codex-cli/bin/codex", "Contents/Resources/codex")
 
 
 class BridgeError(Exception):
     pass
+
+
+def bundled_cli(app):
+    """Find the desktop's CLI across current and legacy bundle layouts."""
+    for relative in BUNDLED_CLI_PATHS:
+        path = Path(app) / relative
+        if path.is_file():
+            return path
+    return None
 
 
 def run(args, check=True, timeout=15):
@@ -224,20 +235,20 @@ class Bridge:
         self.login_plist = self.home / f"Library/LaunchAgents/{LOGIN_LABEL}.plist"
         self.backup_env = self.root / "previous-launch-environment.json"
         self.domain = f"gui/{os.getuid()}"
-        self.app = next((p for p in [Path("/Applications/ChatGPT.app"), Path("/Applications/Codex.app")]
-                         if (p / "Contents/Resources/codex").is_file()), None)
+        self.app = next((p for p in APPLICATION_PATHS if bundled_cli(p) is not None), None)
 
     def prepare(self):
-        if self.app is None:
+        if self.app is None or bundled_cli(self.app) is None:
             raise BridgeError("找不到 /Applications/ChatGPT.app 或 Codex.app 中的 Codex。")
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.root, 0o700)
 
     @property
     def cli(self):
-        if self.app is None:
+        path = bundled_cli(self.app) if self.app is not None else None
+        if path is None:
             raise BridgeError("找不到桌面应用自带的 Codex。")
-        return str(self.app / "Contents/Resources/codex")
+        return str(path)
 
     def loaded(self, label):
         return run(["/bin/launchctl", "print", f"{self.domain}/{label}"], check=False).returncode == 0
