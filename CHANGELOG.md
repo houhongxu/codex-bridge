@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- 统一发现桌面内置 Codex CLI，兼容新版 `Contents/Resources/codex-cli/bin/codex` 与旧版 `Contents/Resources/codex`，修复应用升级后 `cb on` 或安装检测提示找不到 Codex 的问题。
 - CLI 命名尚未落盘的分页空会话前，通过官方历史读取接口请求持久化并核对文件，避免手动打开命名任务时报 `missing source rollout`；不注入消息、不自动导航桌面。无法确认时拒绝本次命名并提示先发送第一条消息。
 
 - 新建普通对话不再因为尚未生成历史文件而提前打开桌面，避免反复出现 `no rollout found` / `missing source rollout`。

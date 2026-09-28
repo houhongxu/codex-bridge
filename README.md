@@ -45,7 +45,7 @@ cb cli --version       # 官方 CLI 版本
 
 - macOS，交互终端使用 zsh；其他 shell 的别名不会自动配置。
 - Python 3.9+，建议使用 3.11 或更新的受支持版本；需要 `venv` 和联网安装依赖。
-- `/Applications/ChatGPT.app` 或 `/Applications/Codex.app`，应用内包含 `Contents/Resources/codex`。
+- `/Applications/ChatGPT.app` 或 `/Applications/Codex.app`，应用内包含 `Contents/Resources/codex-cli/bin/codex`（兼容旧版 `Contents/Resources/codex`）。
 - 应用内的 CLI 支持 `app-server --listen`、`--remote`、`--remote-auth-token-env`；已在桌面应用中完成登录。
 - 若需要宠物显示进度，桌面版本和你的账号必须已有原生宠物功能。cb 不安装或解锁宠物。
 - 本机 `127.0.0.1:4500` 可用。已有服务占用时，cb 会报错，不会接管或终止它。
