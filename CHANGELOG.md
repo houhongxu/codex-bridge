@@ -2,7 +2,23 @@
 
 用户可见的改动记录在此。版本遵循语义化版本形式；`0.x` 预发布阶段仍可能调整接口。项目首次公开发布之前的本机调试不作为独立发布版本。
 
-## [Unreleased] — 0.2.0-alpha.1
+## [Unreleased] — 0.3.0-alpha.1
+
+### Breaking changes
+
+- 唯一命令入口从 `cb` 改为小写 `cx`，源码入口改为 `cx.py`，不提供 `cb` 兼容命令。重新安装时替换管理的别名块，清理指向旧运行副本的 `cb` / `codex-pet` 链接，更新下次登录的命令；用户自定义文件保留。
+- 旧终端需打开新窗口，或执行 `unalias cb cx cpet 2>/dev/null; source ~/.zshrc`。`CB_PYTHON`、`CB_QUESTION_SYNC`、共享后台地址、运行目录和会话存储保持原位；安装不重启任务。
+
+### Changed
+
+- 中英文 README 与架构文档以桌面版 Codex 内置 CLI 为使用基础，明确无需独立 npm CLI，并区分同一二进制版本与共享正在运行的会话。
+- 说明共享 App Server、`--remote` 转接及桌面任务订阅如何同步两个前端的消息、任务事件和实时异步回答，以及呈现、历史问题和工具权限的边界。
+
+### Fixed
+
+- 纳入新版桌面 CLI 路径兼容修复（PR #11），支持 `Contents/Resources/codex-cli/bin/codex` 与旧布局，供本机安装使用。
+
+## 0.2.0-alpha.1 — 历史开发记录
 
 ### Breaking changes
 
@@ -12,6 +28,7 @@
 
 ### Fixed
 
+- 统一发现桌面内置 Codex CLI，兼容新版 `Contents/Resources/codex-cli/bin/codex` 与旧版 `Contents/Resources/codex`，修复应用升级后 `cb on` 或安装检测提示找不到 Codex 的问题。
 - CLI 命名尚未落盘的分页空会话前，通过官方历史读取接口请求持久化并核对文件，避免手动打开命名任务时报 `missing source rollout`；不注入消息、不自动导航桌面。无法确认时拒绝本次命名并提示先发送第一条消息。
 
 - 新建普通对话不再因为尚未生成历史文件而提前打开桌面，避免反复出现 `no rollout found` / `missing source rollout`。

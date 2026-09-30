@@ -2,22 +2,28 @@
 
 ## 一句话
 
-CLI 与桌面共用本地 App Server；转接器让桌面打开并订阅 CLI 的普通任务，宠物使用桌面已有的任务状态。
+桌面版 Codex 和由 `cx` 启动的桌面内置 CLI 共用本地 App Server；转接器让桌面打开并订阅 CLI 的普通任务，宠物使用桌面已有的任务状态。
 
 ```mermaid
 flowchart LR
-    CLI[CLI cb] <-->|RPC 与提问适配| Relay[每个 CLI 的转接器]
+    CLI[CLI cx] <-->|RPC 与提问适配| Relay[每个 CLI 的转接器]
     Relay <--> Server[本机 App Server :4500]
     Desktop[桌面应用] <-->|自己的后台连接| Server
     Relay -.->|需要时打开 codex://threads/ID| Desktop
     Desktop --> Pet[原生宠物]
 ```
 
-后台是本机运行的 Codex 服务进程，负责管理任务和工具执行并调用模型服务；cb 不在本机部署模型。
+后台是本机运行的 Codex 服务进程，负责管理任务和工具执行并调用模型服务；cx 不在本机部署模型。
+
+## 同一个二进制与同一个会话
+
+`cx` 从检测到的桌面应用包直接查找 CLI，优先 `Contents/Resources/codex-cli/bin/codex`，兼容旧版 `Contents/Resources/codex`。不会通过 `$PATH` 选择独立 npm CLI。共享后台的启动参数是 `[self.cli, "app-server", "--listen", ENDPOINT]`；终端 CLI 同样使用 `self.cli`，加上 `--remote <临时转接地址>` 后接入共享后台。两种进程来自同一个桌面安装；桌面更新后，已有进程仍需重新启动才能加载新版本。
+
+只运行这个二进制可统一 CLI 版本，但不会自动让桌面连接该后台或订阅该任务。共享 App Server 管理相同的 thread/session、消息和任务事件；转接器建立桌面订阅并适配两端实时异步回答。桌面版 Codex 和终端是两个前端，共享后台不等于完全相同的 UI、工具上下文或权限环境。无需单独安装 npm `@openai/codex`。
 
 ## 建立订阅
 
-1. `cb` 准备 launchd 管理的共享后台，并为自己的 CLI 启动临时 WebSocket 转接器。
+1. `cx` 准备 launchd 管理的共享后台，并为自己的 CLI 启动临时 WebSocket 转接器。
 2. 转接器关联该连接的 `thread/start`、`thread/resume`、`thread/fork` 请求与响应；只有明确 `ephemeral: false`、请求未指定临时任务且响应带本地绝对 `path` 的成功响应才进入可接入集合。
 3. `path` 可能仅是预定位置。已有文件必须是可读的普通 JSONL 文件，首行包含完整的 `session_meta`，才会对未确认订阅的任务执行 `open -g -a <app> codex://threads/<id>`。空的新对话暂不打开桌面，也不持续轮询。
 4. 桌面打开任务后，用自己的连接调用 `thread/resume`，加载任务并接收后续事件。这与脚本自己建一个订阅连接不同：事件需要到达桌面所持有的连接。
@@ -56,8 +62,8 @@ flowchart LR
 ## 安装模型
 
 ```text
-任意源码目录 cb/ -- ./install.sh --> 固定运行目录 runtime/
-~/.local/bin/cb ---------------------> ├── cb.py
+任意源码目录 codex-bridge/ -- ./install.sh --> 固定运行目录 runtime/
+~/.local/bin/cx ---------------------> ├── cx.py
                                       ├── desktop_bridge.py
                                       ├── question_sync.py
                                       ├── requirements.txt
@@ -70,10 +76,10 @@ flowchart LR
 
 | 文件 | 职责 |
 | --- | --- |
-| `cb.py` | 用户级安装、launchd 管理、桌面连接配置、CLI 生命周期和诊断 |
+| `cx.py` | 用户级安装、launchd 管理、桌面连接配置、CLI 生命周期和诊断 |
 | `desktop_bridge.py` | 转发 RPC、识别任务归属、触发桌面接入并调用提问适配器 |
 | `question_sync.py` | 将实时异步提问转换为可关闭的 CLI 提问框，匹配桌面回答并提交 CLI 回答 |
 | `install.sh` | 平台/Python 预检查并调用安装入口 |
 | `tests/` | 隔离的安装、状态与协议回归测试 |
 
-转接进程随所属 CLI 退出；共享后台由 launchd 管理。结束 CLI 不等于停止共享后台。任务记录仍由 Codex 自身管理，cb 不改写对话存储。
+转接进程随所属 CLI 退出；共享后台由 launchd 管理。结束 CLI 不等于停止共享后台。任务记录仍由 Codex 自身管理，cx 不改写对话存储。

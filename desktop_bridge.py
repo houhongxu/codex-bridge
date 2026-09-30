@@ -304,7 +304,7 @@ class EmptyThreadNames:
         self.send_backend = send_backend
         self.send_cli = send_cli
         self.paths = {}
-        self.prefix = "cb-history-" + uuid.uuid4().hex + "-"
+        self.prefix = "cx-history-" + uuid.uuid4().hex + "-"
         self.pending = {}
         self.tasks = set()
         self.lock = asyncio.Lock()
@@ -357,7 +357,7 @@ class EmptyThreadNames:
                     if not rollout_ready(path):
                         await self.send_cli({"id": message["id"], "error": {
                             "code": -32603,
-                            "message": "cb could not persist this empty thread before naming it. "
+                            "message": "cx could not persist this empty thread before naming it. "
                                        "Send the first message in CLI, then retry naming; "
                                        "do not open the empty thread in Desktop yet."}})
                         return

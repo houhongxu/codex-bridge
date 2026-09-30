@@ -57,7 +57,7 @@ class EmptyThreadIntegrationTests(unittest.IsolatedAsyncioTestCase):
                                     if message.get('id') == request_id:
                                         self.assertNotIn('error', message, message)
                                         return message['result']
-                            await rpc('initialize', {'clientInfo': {'name': 'cb-isolated-test', 'version': '0'},
+                            await rpc('initialize', {'clientInfo': {'name': 'cx-isolated-test', 'version': '0'},
                                                      'capabilities': {'experimentalApi': True}})
                             yield rpc
             finally:
@@ -69,7 +69,7 @@ class EmptyThreadIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     await process.wait()
 
     async def test_named_empty_thread_supports_history_and_cold_resume(self):
-        with tempfile.TemporaryDirectory(prefix='cb-empty-test-') as directory:
+        with tempfile.TemporaryDirectory(prefix='cx-empty-test-') as directory:
             home = Path(directory)
             (home / 'config.toml').write_text(
                 'model="test"\nmodel_provider="test"\n'
