@@ -1,6 +1,6 @@
 # Codex Bridge
 
-**让 Codex CLI 与桌面端共享会话。** macOS 上的本地共享后台与会话桥接工具，支持会话接续、任务订阅、异步问答适配和桌面宠物状态展示。
+**使用桌面版 Codex 自带的 CLI，让终端与桌面共享会话和任务信息。** macOS 上的本地共享后台与会话桥接工具，支持会话接续、任务订阅、异步问答适配和桌面宠物状态展示。
 
 [![CI](https://github.com/houhongxu/codex-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/houhongxu/codex-bridge/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -8,29 +8,47 @@
 
 简体中文 · [English](README.en.md) · [排障](docs/troubleshooting.md) · [实现原理](docs/architecture.md)
 
-> **实验性项目，当前版本 0.2.0-alpha.1。** Codex Bridge 是社区工具，与 OpenAI 无隶属或背书关系。它依赖桌面应用的任务链接、外部后台连接设置及日志格式；桌面升级可能影响兼容性。首次接入任务可能切换桌面当前页面。
+> **实验性项目，当前版本 0.3.0-alpha.1。** Codex Bridge 是社区工具，与 OpenAI 无隶属或背书关系。它依赖桌面应用的任务链接、外部后台连接设置及日志格式；桌面升级可能影响兼容性。首次接入任务可能切换桌面当前页面。
 
-## 0.2 命令迁移（Breaking change）
+## 0.3 命令迁移（Breaking change）
 
-项目更名为 **Codex Bridge**，唯一入口为 `cb`，不再提供 `cx`、`cpet` 或 `codex-pet`。升级安装会替换安装器管理的别名块并移除指向旧运行副本的 `codex-pet` 链接；用户自己定义的其他文件不会被删除。旧终端执行 `unalias cx cpet 2>/dev/null; source ~/.zshrc`，或打开新终端。
-
+唯一命令入口从 `cb` 改为小写 `cx`；项目名仍为 **Codex Bridge**，源码入口为 `cx.py`。不提供 `cb`、`cpet` 或 `codex-pet` 兼容命令。重新执行 `./install.sh` 后，安装器替换管理的别名块，清理指向旧运行副本的 `cb` / `codex-pet` 链接，并更新下次登录使用的命令。用户自定义的其他文件和命令保留。打开新终端，或执行 `unalias cb cx cpet 2>/dev/null; source ~/.zshrc`。
 ```sh
-cb                     # 启动 CLI
-cb resume <任务名或ID>  # 接续共享会话
-cb status              # 查看后台与桌面接入状态
-cb cli --help          # 官方 CLI 帮助
-cb --help              # Bridge 管理帮助
-cb --version           # Bridge 版本
-cb cli --version       # 官方 CLI 版本
+cx                     # 启动 CLI
+cx resume <任务名或ID>  # 接续共享会话
+cx status              # 查看后台与桌面接入状态
+cx cli --help          # 官方 CLI 帮助
+cx --help              # Bridge 管理帮助
+cx --version           # Bridge 版本
+cx cli --version       # 官方 CLI 版本
 ```
 
-`on/off/enable/disable/status/install/uninstall/login-start` 是管理子命令；需要把同名参数交给官方 CLI 时使用 `cb cli ...`。配置变量同步改为 `CB_PYTHON`、`CB_QUESTION_SYNC`（旧 `CPET_*` 不再读取）。后台地址、会话目录、launchd 标签和运行目录保持原位，不重启正在运行的任务。旧进程需结束当前工作后重新启动才加载更新。GitHub 仓库为 `houhongxu/codex-bridge`。
+`on/off/enable/disable/status/install/uninstall/login-start` 是管理子命令；需要把同名参数交给官方 CLI 时使用 `cx cli ...`。本次仅迁移命令名称；配置变量继续使用 `CB_PYTHON`、`CB_QUESTION_SYNC`（旧 `CPET_*` 不读取）。后台地址、会话目录、launchd 标签和运行目录保持原位，不重启正在运行的任务。旧进程需结束当前工作后重新启动才加载更新。GitHub 仓库为 `houhongxu/codex-bridge`。
 
 ## 为什么需要它
 
-在终端开始任务，再到桌面查看、接续或处理异步问题，不必维护两套独立会话。Codex Bridge 将 CLI 与桌面连接到同一个本机 App Server，并按需建立桌面任务订阅；原生宠物可使用这些任务状态展示进度。
+先安装并登录**桌面版 Codex**。`cx` 直接使用桌面应用自带的 Codex CLI，不依赖 `$PATH` 中的 `codex`，也不需要单独安装 npm `@openai/codex`。终端 CLI 与共享 App Server 都从同一个应用包启动，版本随桌面应用更新；正在运行的旧进程需结束工作后重新启动，才会加载更新后的二进制。
 
-- `cb` 自动准备共享后台和 CLI 转接，无需手写 `--remote` 地址。
+**使用同一个 CLI 二进制，不等于自动共享同一个正在运行的会话。** 直接运行应用内的 `codex` 可以统一版本，但不会自动让桌面和终端连接到同一个后台、订阅同一个任务。Codex Bridge 补上的是共享 App Server、任务订阅和双端问答适配。
+
+| 使用方式 | CLI 版本 | 桌面与终端的实时会话 |
+| --- | --- | --- |
+| 独立 npm `codex` + 桌面版 Codex | 可能不同 | 不会自动共享 |
+| 直接运行桌面应用内置 `codex` | 来自同一个桌面安装 | 不会自动共享正在运行的会话 |
+| `cx` + 桌面版 Codex | CLI 与共享后台使用同一个应用包 | 连接同一 App Server 并订阅同一任务后共享 |
+
+```mermaid
+flowchart LR
+    CLI[终端 cx → 桌面内置 Codex CLI] <-->|--remote / RPC 与提问适配| Relay[CLI 转接器]
+    Relay <--> Server[共享 App Server 127.0.0.1:4500]
+    Desktop[桌面版 Codex] <-->|任务订阅与事件| Server
+```
+
+`cx on` 用桌面内置 CLI 启动 `app-server --listen ws://127.0.0.1:4500`，并设置桌面的共享后台连接。`cx` 启动终端 CLI 时通过 `--remote` 连接临时转接器，转接器再连接共享 App Server。两个前端接入同一个任务后，可以查看消息与任务事件、接续会话，并通过兼容层同步实时异步提问的回答；桌面原生宠物可使用任务状态展示进度。首次接入及恢复订阅可能切换桌面任务页。
+
+这里同步的是共享后台中的会话与任务信息，具体呈现仍由各自前端决定。历史未答问题在桌面回答；两端同时提交回答没有原子去重保证。桌面专用工具、权限环境及界面状态也不保证完全一致，详见[异步提问说明](#桌面与-cli-的异步提问同步)和[兼容性记录](docs/compatibility.md)。
+
+- `cx` 自动准备共享后台和 CLI 转接，无需手写 `--remote` 地址。
 - 已确认的订阅可以复用，连续提问不再逐轮切换桌面页面。
 - 检测到桌面重启、连接重建或任务退订后，下次使用任务时尝试恢复订阅。
 - 过滤临时任务，避免把没有持久化记录的内部会话打开到桌面。
@@ -45,16 +63,16 @@ cb cli --version       # 官方 CLI 版本
 
 - macOS，交互终端使用 zsh；其他 shell 的别名不会自动配置。
 - Python 3.9+，建议使用 3.11 或更新的受支持版本；需要 `venv` 和联网安装依赖。
-- `/Applications/ChatGPT.app` 或 `/Applications/Codex.app`，应用内包含 `Contents/Resources/codex-cli/bin/codex`（兼容旧版 `Contents/Resources/codex`）。
+- 桌面版 Codex 已安装在 `/Applications/ChatGPT.app` 或 `/Applications/Codex.app`，应用内包含 `Contents/Resources/codex-cli/bin/codex`（兼容旧版 `Contents/Resources/codex`）。
 - 应用内的 CLI 支持 `app-server --listen`、`--remote`、`--remote-auth-token-env`；已在桌面应用中完成登录。
-- 若需要宠物显示进度，桌面版本和你的账号必须已有原生宠物功能。cb 不安装或解锁宠物。
-- 本机 `127.0.0.1:4500` 可用。已有服务占用时，cb 会报错，不会接管或终止它。
+- 若需要宠物显示进度，桌面版本和你的账号必须已有原生宠物功能。cx 不安装或解锁宠物。
+- 本机 `127.0.0.1:4500` 可用。已有服务占用时，cx 会报错，不会接管或终止它。
 
 已检查的版本与验证范围见 [兼容性表](docs/compatibility.md)。Windows、Linux、其他厂商 CLI 目前不在支持范围内。
 
 ## 快速开始
 
-选择你自己的源码目录，下面以 `~/workspace/cb` 为例：
+选择你自己的源码目录，下面以 `~/workspace/codex-bridge` 为例：
 
 ```sh
 mkdir -p ~/workspace
@@ -62,20 +80,20 @@ git clone https://github.com/houhongxu/codex-bridge.git ~/workspace/codex-bridge
 cd ~/workspace/codex-bridge
 ./install.sh
 source ~/.zshrc
-cb --version
-cb on
-cb status
+cx --version
+cx on
+cx status
 ```
 
-**首次连接桌面：** 如果桌面应用在执行 `cb on` 前就已经运行，请先结束其中的任务，退出桌面应用，再执行一次 `cb on`。连接设置在桌面应用启动时生效；cb 不会强制重启正在工作的应用。
+**首次连接桌面：** 如果桌面应用在执行 `cx on` 前就已经运行，请先结束其中的任务，退出桌面应用，再执行一次 `cx on`。连接设置在桌面应用启动时生效；cx 不会强制重启正在工作的应用。
 
 然后进入需要操作的项目目录：
 
 ```sh
 cd /path/to/your/project
-cb
+cx
 # 或从所有目录的历史任务中选择恢复：
-cb resume --all
+cx resume --all
 ```
 
 在桌面中启用宠物，并用一个正在运行或等待确认的普通任务检查显示情况。首次接入可能打开该任务；后续提问复用订阅。`--all` 扩大历史任务选择范围，不会同时运行所有任务。
@@ -83,24 +101,24 @@ cb resume --all
 可选登录自启：
 
 ```sh
-cb enable
+cx enable
 # 取消登录自启，但保留当前运行中的任务：
-cb disable
+cx disable
 ```
 
 ## 桌面与 CLI 的异步提问同步
 
-从 `0.1.0-alpha.2` 起，新启动的 `cb` 默认适配**连接后收到的实时异步问题**：桌面回答后，CLI 自动关闭对应提问框；从 CLI 回答则以桌面兼容格式提交到同一任务。官方 CLI 和桌面应用文件均不修改。
+从 `0.1.0-alpha.2` 起，新启动的 `cx` 默认适配**连接后收到的实时异步问题**：桌面回答后，CLI 自动关闭对应提问框；从 CLI 回答则以桌面兼容格式提交到同一任务。官方 CLI 和桌面应用文件均不修改。
 
 CLI 会显示标准提问框，界面与原生异步问题不同；按 `Esc` 会沿用该界面的中断行为。恢复历史任务时保留问题正文，但不重建旧提问框；历史中尚未回答的问题请在桌面回答。已收到的回答及迟到的重复提交会去重，但不能保证两个客户端完全同时作答时只有一份答案。
 
-如收到“cb could not confirm this answer”，请先在桌面确认答案是否到达，再决定是否重答；cb 不自动重试。要关闭兼容层、恢复原始转发行为：
+如收到“cx could not confirm this answer”，请先在桌面确认答案是否到达，再决定是否重答；cx 不自动重试。要关闭兼容层、恢复原始转发行为：
 
 ```sh
-CB_QUESTION_SYNC=0 cb resume --all
+CB_QUESTION_SYNC=0 cx resume --all
 ```
 
-验证版本、具体边界见 [兼容性记录](docs/compatibility.md)；升级后要退出旧 `cb` 再恢复任务才生效。
+验证版本、具体边界见 [兼容性记录](docs/compatibility.md)；升级后要退出旧 `cx` 再恢复任务才生效。
 
 从 `0.1.0-alpha.3` 起，标准问答回复在 CLI 的实时消息和历史记录中显示为：
 
@@ -117,52 +135,52 @@ CB_QUESTION_SYNC=0 cb resume --all
 | --- | --- |
 | 源码仓库 | 你选择的 Git clone 目录，可移动或删除 |
 | 安装后的代码与独立 Python 环境 | `~/Library/Application Support/Codex CLI Bridge/runtime/` |
-| 稳定命令入口 | `~/.local/bin/cb`，指向运行副本 |
+| 稳定命令入口 | `~/.local/bin/cx`，指向运行副本 |
 | zsh 别名 | `~/.zshrc` 中的 `codex-cli-bridge` 标记块 |
 | 自启配置 | `~/Library/LaunchAgents/local.codex-cli-bridge.login.plist` |
 | 日志、订阅诊断与备份 | `~/Library/Application Support/Codex CLI Bridge/` |
 
 安装器复制脚本，并在固定运行目录创建 `.venv`；命令不会依赖源码仓库的位置。它使用 `websockets==15.0.1`，从 PyPI 安装到该独立环境，不安装到系统 Python。安装默认不启用登录自启，也不启动后台。
 
-安装器会备份需要修改的 `.zshrc`，拒绝覆盖标记块外已有的 `cb` / `cb` 定义。可用 `CB_PYTHON=/path/to/python3 ./install.sh` 指定安装环境的 Python。
+安装器会备份需要修改的 `.zshrc`，拒绝覆盖标记块外已有的 `cx` 别名或函数。可用 `CB_PYTHON=/path/to/python3 ./install.sh` 指定安装环境的 Python。
 
 ## 常用命令
 
 | 命令 | 作用 |
 | --- | --- |
-| `cb` | 启动交互 CLI，新任务使用终端当前项目目录 |
-| `cb resume --all` | 从所有目录的历史任务中选择一个恢复 |
-| `cb fork` | 使用 CLI 的任务分支功能，默认保留原任务目录 |
-| `cb on` | 准备共享后台、设置桌面连接并打开应用 |
-| `cb off` | 停止共享后台并恢复之前的桌面连接设置，会中断依赖它的任务 |
-| `cb enable` / `disable` | 开启 / 关闭登录自启 |
-| `cb status` / `status --json` | 读取后台状态、宠物设置与最近订阅诊断 |
-| `cb --version` | 显示安装版本 |
-| `cb uninstall` | 停止服务，移除别名、命令和登录自启，保留运行副本与诊断文件 |
+| `cx` | 启动交互 CLI，新任务使用终端当前项目目录 |
+| `cx resume --all` | 从所有目录的历史任务中选择一个恢复 |
+| `cx fork` | 使用 CLI 的任务分支功能，默认保留原任务目录 |
+| `cx on` | 准备共享后台、设置桌面连接并打开应用 |
+| `cx off` | 停止共享后台并恢复之前的桌面连接设置，会中断依赖它的任务 |
+| `cx enable` / `disable` | 开启 / 关闭登录自启 |
+| `cx status` / `status --json` | 读取后台状态、宠物设置与最近订阅诊断 |
+| `cx --version` | 显示安装版本 |
+| `cx uninstall` | 停止服务，移除别名、命令和登录自启，保留运行副本与诊断文件 |
 
-`cb` 面向交互会话及 `resume` / `fork`，不承诺包装所有 Codex 子命令。其他用途可直接使用原始 `codex`。
+`cx` 面向交互会话及 `resume` / `fork`，不承诺包装所有 Codex 子命令。其他用途可直接使用原始 `codex`。
 
 ## 更新、卸载与回退
 
-源码更新不会自动替换运行副本。安装新版脚本不会重启共享后台或桌面；正在运行的 `cb` 仍使用旧代码：
+源码更新不会自动替换运行副本。安装新版脚本不会重启共享后台或桌面；正在运行的 `cx` 仍使用旧代码：
 
 ```sh
-cd /path/to/cb
+cd /path/to/codex-bridge
 git pull --ff-only
 ./install.sh
-cb --version
+cx --version
 ```
 
-退出旧 `cb` 后重新运行 `cb resume --all`。脚本更新不强制重启后台；桌面应用或其内置 CLI 升级后，应在任务结束后重新检查共享后台连接。
+退出旧 `cx` 后重新运行 `cx resume --all`。脚本更新不强制重启后台；桌面应用或其内置 CLI 升级后，应在任务结束后重新检查共享后台连接。
 
 卸载：
 
 ```sh
 # 先结束所有依赖共享后台的任务
-cb uninstall
+cx uninstall
 ```
 
-退出并重新打开桌面应用，打开新终端。源码目录不受影响；运行副本和日志保留以便排障，可在确认不再需要后手动移除。`cb off` 不取消登录自启；仅恢复原连接时，应先 `cb disable` 再 `cb off`。
+退出并重新打开桌面应用，打开新终端。源码目录不受影响；运行副本和日志保留以便排障，可在确认不再需要后手动移除。`cx off` 不取消登录自启；仅恢复原连接时，应先 `cx disable` 再 `cx off`。
 
 版本回退及完整检查步骤见 [维护与发布](docs/maintaining.md)。
 
@@ -171,7 +189,7 @@ cb uninstall
 - 首次订阅或恢复订阅仍可能切换桌面任务页。完全静默的后台订阅尚未实现。
 - 订阅确认依赖本机日志；证据不足时记录 `opened_unconfirmed`，正常情况下至少间隔 60 秒再重试。明确失效事件可触发重新接入。
 - launchd 后台的代理环境、macOS 文件访问权限和桌面专用工具上下文可能与终端/桌面内置后台不同。已遇到文稿目录权限和桌面工具管道不可用的问题。
-- 本地固定共享端口不提供 cb 自己的鉴权；每个 CLI 的临时转接端口使用随机 Bearer 凭据。仅支持本机回环地址，不要向局域网或互联网暴露它。详见 [安全说明](SECURITY.md)。
+- 本地固定共享端口不提供 cx 自己的鉴权；每个 CLI 的临时转接端口使用随机 Bearer 凭据。仅支持本机回环地址，不要向局域网或互联网暴露它。详见 [安全说明](SECURITY.md)。
 - 桌面任务静音、活动气泡隐藏、任务已读且空闲等状态会影响宠物显示。
 - 自定义 `CODEX_HOME`、非默认应用位置、多个桌面实例与 SSH 远程主机尚未验证。
 
@@ -191,4 +209,4 @@ sh -n install.sh
 
 ## 许可证
 
-[MIT](LICENSE) © 2026 houhongxu。Codex、ChatGPT 及相关产品名称属于其各自权利人；本仓库仅分发 cb 自身的代码，不包含 OpenAI 应用、模型或宠物素材。
+[MIT](LICENSE) © 2026 houhongxu。Codex、ChatGPT 及相关产品名称属于其各自权利人；本仓库仅分发 cx 自身的代码，不包含 OpenAI 应用、模型或宠物素材。
