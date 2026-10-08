@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import shutil
 import subprocess
 import sys
@@ -79,6 +80,96 @@ class BundleDiscoveryTests(unittest.TestCase):
                 bridge.start_server()
                 run.assert_not_called()
             self.assertEqual(bridge.server_plist.read_bytes(), original)
+
+
+class DesktopConnectionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.bridge = cx.Bridge(self.temp.name)
+        self.bridge.app, _ = make_bundle(self.temp.name)
+        (self.bridge.app / "Contents/Info.plist").write_bytes(cx.plistlib.dumps({"CFBundleExecutable": "ChatGPT"}))
+        self.main = str(self.bridge.app / "Contents/MacOS/ChatGPT")
+        self.processes = subprocess.CompletedProcess([], 0,
+            f"123 {self.main}\n124 {self.bridge.app}/Contents/Resources/codex app-server\n", "")
+
+    def probe(self, output="", code=0, error=""):
+        sockets = subprocess.CompletedProcess([], code, output, error)
+        with patch.object(cx, "run", side_effect=[self.processes, sockets]) as run:
+            state = self.bridge.desktop_connection()
+        self.assertIn("123", run.call_args_list[1].args[0])
+        self.assertNotIn("124", run.call_args_list[1].args[0])
+        return state
+
+    def test_only_main_desktop_outgoing_established_socket_counts(self):
+        self.assertEqual(self.probe("p123\nn127.0.0.1:63254->127.0.0.1:4500\nTST=ESTABLISHED\n"), "connected")
+        for output in ("p124\nn127.0.0.1:63254->127.0.0.1:4500\n",
+                       "p123\nn127.0.0.1:4500->127.0.0.1:63254\n",
+                       "p123\nn127.0.0.1:63254->127.0.0.1:4501\n"):
+            with self.subTest(output=output):
+                self.assertEqual(self.probe(output), "disconnected")
+        self.assertEqual(self.probe(code=1), "disconnected")
+
+    def test_no_running_app_and_probe_failures_are_distinct(self):
+        with patch.object(cx, "run", return_value=subprocess.CompletedProcess([], 0, "999 unrelated\n", "")) as run:
+            self.assertEqual(self.bridge.desktop_connection(), "not_running")
+            self.assertEqual(run.call_count, 1)
+        for result in (subprocess.CompletedProcess([], 1, "", "operation not permitted"),
+                       subprocess.CompletedProcess([], 0, "", "permission denied")):
+            with self.subTest(result=result), patch.object(cx, "run", return_value=result):
+                self.assertEqual(self.bridge.desktop_connection(), "unknown")
+        self.assertEqual(self.probe(code=1, error="permission denied"), "unknown")
+        self.assertEqual(self.probe(code=2), "unknown")
+        with patch.object(cx, "run", side_effect=cx.BridgeError("probe timed out")):
+            self.assertEqual(self.bridge.desktop_connection(), "unknown")
+        (self.bridge.app / "Contents/Info.plist").unlink()
+        self.assertEqual(self.bridge.desktop_connection(), "unknown")
+
+    def test_brief_startup_wait_accepts_late_connection_and_connected_returns_immediately(self):
+        with patch.object(self.bridge, "_desktop_connection", side_effect=["not_running", "disconnected", "connected"]), \
+                patch.object(cx.time, "sleep") as sleep:
+            self.assertEqual(self.bridge.desktop_connection(wait=2), "connected")
+            self.assertEqual(sleep.call_count, 2)
+        for state in ("connected", "unknown"):
+            with self.subTest(state=state), patch.object(self.bridge, "_desktop_connection", return_value=state), \
+                    patch.object(cx.time, "sleep") as sleep:
+                self.assertEqual(self.bridge.desktop_connection(wait=2), state)
+                sleep.assert_not_called()
+        with patch.object(self.bridge, "_desktop_connection", return_value="disconnected"), \
+                patch.object(cx.time, "monotonic", side_effect=[0, 3]), patch.object(cx.time, "sleep") as sleep:
+            self.assertEqual(self.bridge.desktop_connection(wait=2), "disconnected")
+            sleep.assert_not_called()
+
+    def test_quiet_on_warns_once_without_blocking_or_changing_launch(self):
+        for state in ("connected", "disconnected", "not_running", "unknown"):
+            with self.subTest(state=state), patch.object(self.bridge, "start_server"), \
+                    patch.object(self.bridge, "set_desktop_env"), patch.object(cx, "run") as run, \
+                    patch.object(self.bridge, "desktop_connection", return_value=state) as connection, \
+                    patch.object(cx.sys, "stderr", new_callable=io.StringIO) as stderr, \
+                    patch.object(cx.sys, "stdout", new_callable=io.StringIO) as stdout:
+                self.bridge.on(quiet=True)
+                connection.assert_called_once_with(wait=2)
+                run.assert_called_once_with(["/usr/bin/open", "-g", "--env", f"{cx.ENV_KEY}={cx.ENDPOINT}",
+                                             "-a", str(self.bridge.app)])
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertEqual(stderr.getvalue().count("提示："), int(state != "connected"))
+                if state == "disconnected":
+                    self.assertIn("完全退出桌面（不是关闭窗口），然后运行 cx on", stderr.getvalue())
+                if state == "unknown":
+                    self.assertIn("无法确认", stderr.getvalue())
+                    self.assertNotIn("当前桌面未接入", stderr.getvalue())
+
+    def test_status_separates_observed_connection_from_next_launch_config(self):
+        for state in ("connected", "disconnected", "not_running", "unknown"):
+            with self.subTest(state=state), patch.object(self.bridge, "loaded", return_value=True), \
+                    patch.object(self.bridge, "healthy", return_value=True), \
+                    patch.object(self.bridge, "launch_env", return_value=cx.ENDPOINT), \
+                    patch.object(self.bridge, "desktop_connection", return_value=state):
+                data = self.bridge.status()
+                self.assertTrue(data["desktop_next_launch_configured"])
+                self.assertEqual(data["desktop_connection"], state)
+                self.assertEqual(data["desktop_connected"], None if state == "unknown" else state == "connected")
+                self.assertIn("last_desktop_attachment", data)
 
 
 class PetDiagnosticsTests(unittest.TestCase):

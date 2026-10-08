@@ -339,15 +339,77 @@ class Bridge:
                 run(["/bin/launchctl", "setenv", ENV_KEY, previous])
         self.backup_env.unlink()
 
+    def desktop_connection(self, wait=0):
+        """Observe the app's outgoing socket, not its next-launch environment."""
+        deadline = time.monotonic() + wait
+        while True:
+            state = self._desktop_connection()
+            if state in ("connected", "unknown") or time.monotonic() >= deadline:
+                return state
+            time.sleep(0.2)
+
+    def _desktop_connection(self):
+        try:
+            if self.app is None:
+                return "unknown"
+            info = plistlib.loads((self.app / "Contents/Info.plist").read_bytes())
+            if not isinstance(info, dict):
+                return "unknown"
+            executable = info.get("CFBundleExecutable")
+            if not isinstance(executable, str) or not executable or Path(executable).name != executable:
+                return "unknown"
+            main = str(self.app / "Contents/MacOS" / executable)
+            processes = run(["/bin/ps", "-axo", "pid=,comm="], check=False, timeout=2)
+            if processes.returncode or processes.stderr.strip():
+                return "unknown"
+            pids = []
+            for line in processes.stdout.splitlines():
+                fields = line.strip().split(None, 1)
+                if len(fields) == 2 and fields[0].isdigit() and fields[1] == main:
+                    pids.append(fields[0])
+            if not pids:
+                return "not_running"
+            sockets = run(["/usr/sbin/lsof", "-nP", "-a", "-p", ",".join(pids),
+                           "-iTCP:4500", "-sTCP:ESTABLISHED", "-FpnT"], check=False, timeout=2)
+            if sockets.returncode not in (0, 1) or sockets.stderr.strip():
+                return "unknown"
+            # Port filtering also matches accepted server sockets. Require the
+            # desktop main PID and the shared endpoint on the outgoing side.
+            pid = None
+            for line in sockets.stdout.splitlines():
+                if line.startswith("p"):
+                    pid = line[1:]
+                elif pid in pids and re.fullmatch(r"n127\.0\.0\.1:\d+->127\.0\.0\.1:4500", line):
+                    return "connected"
+            return "disconnected"
+        except (BridgeError, OSError, ValueError):
+            return "unknown"
+
+    @staticmethod
+    def desktop_connection_hint(state):
+        if state == "disconnected":
+            print("提示：当前桌面未接入共享后台，可能显示“已在另一个应用中打开”或反复跳转。"
+                  "请在任务结束后完全退出桌面（不是关闭窗口），然后运行 cx on 接入共享后台。",
+                  file=sys.stderr)
+        elif state == "not_running":
+            print("提示：桌面尚未运行，暂未确认共享连接；稍后运行 cx status 检查。", file=sys.stderr)
+        elif state == "unknown":
+            print("提示：无法确认桌面当前是否接入共享后台；请运行 cx status 检查。"
+                  "下次启动已配置不代表当前连接已生效。", file=sys.stderr)
+
     def on(self, quiet=False):
         self.start_server()
         self.set_desktop_env()
         # LaunchServices reuses an existing app instance. Never quit or restart it.
         run(["/usr/bin/open", "-g", "--env", f"{ENV_KEY}={ENDPOINT}",
              "-a", str(self.app)])
+        state = self.desktop_connection(wait=2)
+        self.desktop_connection_hint(state)
         if not quiet:
             print(f"共享后台已就绪：{ENDPOINT}")
-            print("桌面应用已打开。若它在接入前就已运行，请在任务结束后退出并重开一次。")
+            if state == "connected":
+                print("桌面当前已接入共享后台。")
+            print("桌面下次启动连接：已配置。")
 
     def off(self):
         if self.loaded(SERVER_LABEL):
@@ -390,6 +452,7 @@ class Bridge:
     def status(self):
         owned = self.loaded(SERVER_LABEL)
         healthy = self.healthy()
+        desktop = self.desktop_connection()
         data = {
             "version": __version__,
             "runtime_directory": str(self.runtime),
@@ -399,6 +462,8 @@ class Bridge:
             "autostart_enabled": self.login_plist.exists(),
             "login_agent_loaded": self.loaded(LOGIN_LABEL),
             "desktop_next_launch_configured": self.launch_env() == ENDPOINT,
+            "desktop_connection": desktop,
+            "desktop_connected": None if desktop == "unknown" else desktop == "connected",
             "desktop_pet_sync": "not_verified",
             "pet": pet_settings(self.home),
             "last_desktop_attachment": None,
@@ -531,6 +596,10 @@ def main():
         else:
             print("共享后台：" + ("运行中" if info["server_ready"] else "未就绪"))
             print("登录自启：" + ("已开启" if info["autostart_enabled"] else "已关闭"))
+            labels = {"connected": "已接入共享后台", "disconnected": "未接入共享后台",
+                      "not_running": "未运行", "unknown": "无法确认"}
+            print("桌面当前连接：" + labels[info["desktop_connection"]])
+            bridge.desktop_connection_hint(info["desktop_connection"])
             print("桌面下次启动连接：" + ("已配置" if info["desktop_next_launch_configured"] else "未配置"))
             pet = info["pet"]
             labels = {True: "已展开", False: "已隐藏", None: "无法读取"}
