@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- 检测桌面主进程到共享后台的实际连接，CLI 启动时提示尚未接入的桌面完全退出后运行 `cx on`；`cx status` 区分当前连接与下次启动配置，检测失败显示无法确认。
 - 纳入新版桌面 CLI 路径兼容修复（PR #11），支持 `Contents/Resources/codex-cli/bin/codex` 与旧布局，供本机安装使用。
 
 ## 0.2.0-alpha.1 — 历史开发记录
